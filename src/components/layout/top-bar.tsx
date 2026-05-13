@@ -1,10 +1,5 @@
 import { format } from "date-fns"
-import {
-  ArrowLeft,
-  Bell,
-  Plus,
-  Search,
-} from "lucide-react"
+import { ArrowLeft, Bell, Plus, Search } from "lucide-react"
 import {
   Link,
   matchPath,
@@ -18,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { findNavItem } from "./nav-config"
 
-const MOCK_FLEET_COUNT = 8
+const MOCK_TRIP_COUNT = 12
 const MOCK_COMPANY_COUNT = 1
 const MOCK_CHEST_ID = "100184"
 
@@ -31,11 +26,11 @@ const PAY_STEP_TOTAL = PAY_STEP_LABELS.length
 export function TopBar() {
   const { pathname } = useLocation()
 
-  const onFleetNew = matchPath("/fleet/new", pathname) !== null
-  const detailMatch = matchPath("/fleet/:vehicleId", pathname)
+  const onFleetNew = matchPath("/portal/fleet/new", pathname) !== null
+  const detailMatch = matchPath("/portal/fleet/:vehicleId", pathname)
   const onFleetDetail = detailMatch !== null && !onFleetNew
-  const onPayCharges = matchPath("/pay-charges", pathname) !== null
-  const onPermits = matchPath("/permits", pathname) !== null
+  const onPayCharges = matchPath("/portal/pay-charges", pathname) !== null
+  const onPermits = matchPath("/portal/permits", pathname) !== null
 
   if (onFleetNew) return <CreateTopBar />
   if (onFleetDetail) {
@@ -84,7 +79,7 @@ function DefaultTopBar() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const isFleet = pathname === "/fleet"
+  const isFleet = pathname === "/portal/fleet"
   const current = findNavItem(pathname)
   const today = format(new Date(), "EEE d MMM yyyy")
   const displayName = user.firstName ?? user.displayName
@@ -95,11 +90,11 @@ function DefaultTopBar() {
         {isFleet ? (
           <>
             <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              {MOCK_FLEET_COUNT} vehicles · {MOCK_COMPANY_COUNT} company · Chest
-              ID {MOCK_CHEST_ID}
+              {MOCK_TRIP_COUNT} trips · {MOCK_COMPANY_COUNT} company · Chest ID{" "}
+              {MOCK_CHEST_ID}
             </p>
             <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-foreground">
-              My fleet
+              My trips
             </h1>
           </>
         ) : (
@@ -129,15 +124,16 @@ function DefaultTopBar() {
         {isFleet ? (
           <Button
             size="sm"
-            onClick={() => navigate("/fleet/new")}
+            onClick={() => navigate("/portal/pay-charges?step=vehicle")}
             className="rounded-lg bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
           >
             <Plus />
-            New register
+            New trip
           </Button>
         ) : (
           <Button
             size="sm"
+            onClick={() => navigate("/portal/pay-charges?step=vehicle")}
             className="rounded-lg bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
           >
             <Plus />
@@ -159,7 +155,7 @@ function CreateTopBar() {
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
       <div className="flex min-w-0 flex-col leading-tight">
         <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-          My fleet · UC-002 · Step {stepIndex + 1} of {FLEET_STEP_TOTAL}
+          Vehicle register · UC-002 · Step {stepIndex + 1} of {FLEET_STEP_TOTAL}
         </p>
         <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-foreground">
           Register a new vehicle
@@ -178,7 +174,7 @@ function CreateTopBar() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => navigate("/fleet")}
+          onClick={() => navigate("/portal/fleet")}
           className="rounded-lg"
         >
           Save & exit
@@ -198,10 +194,10 @@ function PayChargesTopBar() {
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
       <div className="flex min-w-0 flex-col leading-tight">
         <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-          New transaction · Step {stepIndex + 1} of {PAY_STEP_TOTAL}
+          New trip · Step {stepIndex + 1} of {PAY_STEP_TOTAL}
         </p>
         <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-foreground">
-          Pay road user charges
+          Create trip
         </h1>
       </div>
       <div className="flex shrink-0 items-center gap-2">
@@ -217,7 +213,7 @@ function PayChargesTopBar() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => navigate("/")}
+          onClick={() => navigate("/portal")}
           className="rounded-lg"
         >
           Save & exit
@@ -228,12 +224,12 @@ function PayChargesTopBar() {
 }
 
 function DetailTopBar({ vehicleId }: { vehicleId: string }) {
-  const eyebrow = "My fleet · Vehicle"
+  const eyebrow = "My trips · Vehicle"
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
       <div className="flex min-w-0 items-center gap-3">
         <Link
-          to="/fleet"
+          to="/portal/fleet"
           aria-label="Back to fleet"
           className="flex size-8 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
