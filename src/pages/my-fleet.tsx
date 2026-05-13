@@ -1,16 +1,17 @@
 import { useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import {
-  CreditCard,
   LayoutList,
   Map as MapIcon,
   MapPin,
-  Play,
   Plus,
+  RefreshCw,
   Search,
 } from "lucide-react"
-import { Link, NavLink } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -19,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Table,
   TableBody,
@@ -28,60 +30,83 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { VehicleIllustration } from "@/components/fleet/vehicle-illustration"
 import {
-  FLEET,
-  calculatePenalty,
-  formatMzn,
-  type Compliance,
-  type Status,
-  type Vehicle,
-} from "@/lib/fleet"
+  getActiveFleetVehicles,
+  type FleetVehicle,
+} from "@/lib/fleet-vehicles-api"
+import { capacityClassLabel } from "@/lib/fleet-vehicle-classification"
+import { formatMzn } from "@/lib/fleet"
 import { cn } from "@/lib/utils"
 
-type StatusFilter = "all" | Status
+type StatusFilter = "all" | "ACTIVE"
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All status" },
-  { value: "active", label: "Active" },
-  { value: "idle", label: "Idle" },
-  { value: "maintenance", label: "Maintenance" },
-  { value: "out-of-service", label: "Out of service" },
+  { value: "all", label: "All active vehicles" },
+  { value: "ACTIVE", label: "Active" },
 ]
 
-function plateHref(plate: string) {
-  return `/fleet/${encodeURIComponent(plate)}`
+const FLEET_VEHICLES_QUERY_KEY = ["fleet-vehicles", "ACTIVE"] as const
+
+function statusLabel(value: string) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+}
+
+function formatCapacity(vehicle: FleetVehicle) {
+  return `${formatMzn(Number(vehicle.capacitySnapshot))} ${vehicle.capacityUnit}`
+}
+
+function includesQuery(vehicle: FleetVehicle, query: string) {
+  const haystack = [
+    vehicle.plateNumberSnapshot,
+    vehicle.truckNumberSnapshot,
+    vehicle.ownerNameSnapshot,
+    vehicle.operatorNameSnapshot,
+    vehicle.vehicleId,
+    capacityClassLabel(vehicle),
+    vehicle.registryStatus,
+    vehicle.exemptionStatus,
+  ]
+    .join(" ")
+    .toLowerCase()
+
+  return haystack.includes(query)
 }
 
 export default function MyFleet() {
   const [view, setView] = useState<"table" | "map">("table")
   const [status, setStatus] = useState<StatusFilter>("all")
   const [query, setQuery] = useState("")
+  const fleetQuery = useQuery({
+    queryKey: FLEET_VEHICLES_QUERY_KEY,
+    queryFn: getActiveFleetVehicles,
+  })
+  const vehicles = fleetQuery.data ?? []
 
   const counts = useMemo(() => {
     const c: Record<StatusFilter, number> = {
-      all: FLEET.length,
-      active: 0,
-      idle: 0,
-      maintenance: 0,
-      "out-of-service": 0,
+      all: vehicles.length,
+      ACTIVE: 0,
     }
-    for (const v of FLEET) c[v.status] += 1
+
+    for (const vehicle of vehicles) {
+      if (vehicle.status === "ACTIVE") c.ACTIVE += 1
+    }
+
     return c
-  }, [])
+  }, [vehicles])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return FLEET.filter((v) => {
-      if (status !== "all" && v.status !== status) return false
+    return vehicles.filter((vehicle) => {
+      if (status !== "all" && vehicle.status !== status) return false
       if (!q) return true
-      return (
-        v.plate.toLowerCase().includes(q) ||
-        v.model.toLowerCase().includes(q) ||
-        (v.driver?.name.toLowerCase().includes(q) ?? false)
-      )
+      return includesQuery(vehicle, q)
     })
-  }, [status, query])
+  }, [query, status, vehicles])
 
   return (
     <div className="space-y-4">
@@ -96,7 +121,13 @@ export default function MyFleet() {
       />
 
       {view === "table" ? (
-        <FleetTable vehicles={filtered} />
+        <FleetTable
+          vehicles={filtered}
+          query={query}
+          isLoading={fleetQuery.isLoading}
+          error={fleetQuery.error}
+          onRetry={() => void fleetQuery.refetch()}
+        />
       ) : (
         <FleetMapPlaceholder count={filtered.length} />
       )}
@@ -128,7 +159,7 @@ function FilterBar({
         <Input
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Search plate, driver, ref…"
+          placeholder="Search plate, truck, owner…"
           className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
         />
       </div>
@@ -137,7 +168,7 @@ function FilterBar({
         value={status}
         onValueChange={(v) => onStatusChange(v as StatusFilter)}
       >
-        <SelectTrigger className="h-9 w-44 rounded-lg">
+        <SelectTrigger className="h-9 w-48 rounded-lg">
           <SelectValue placeholder="Status" />
         </SelectTrigger>
         <SelectContent>
@@ -179,7 +210,19 @@ function FilterBar({
   )
 }
 
-function FleetTable({ vehicles }: { vehicles: Vehicle[] }) {
+function FleetTable({
+  vehicles,
+  query,
+  isLoading,
+  error,
+  onRetry,
+}: {
+  vehicles: FleetVehicle[]
+  query: string
+  isLoading: boolean
+  error: unknown
+  onRetry: () => void
+}) {
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <Table>
@@ -189,19 +232,19 @@ function FleetTable({ vehicles }: { vehicles: Vehicle[] }) {
               Vehicle
             </TableHead>
             <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+              Owner / Operator
+            </TableHead>
+            <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
               Capacity
             </TableHead>
             <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              Color
+              Class
             </TableHead>
             <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              Status
+              Registry
             </TableHead>
             <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              Compliance
-            </TableHead>
-            <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              Overdue amount
+              Rating
             </TableHead>
             <TableHead className="pr-5 text-right text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
               Action
@@ -209,55 +252,15 @@ function FleetTable({ vehicles }: { vehicles: Vehicle[] }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {vehicles.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={7}
-                className="py-12 text-center text-sm text-muted-foreground"
-              >
-                No vehicles match this filter.
-              </TableCell>
-            </TableRow>
+          {isLoading ? (
+            <LoadingRow />
+          ) : error ? (
+            <ErrorRow error={error} onRetry={onRetry} />
+          ) : vehicles.length === 0 ? (
+            <EmptyRow query={query} />
           ) : (
-            vehicles.map((v) => (
-              <TableRow key={v.plate} className="border-border">
-                <TableCell className="pl-5">
-                  <Link
-                    to={plateHref(v.plate)}
-                    className="flex items-center gap-3 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                  >
-                    <VehicleIllustration axles={v.axles} />
-                    <div className="leading-tight">
-                      <p className="text-sm font-medium tracking-wide text-foreground hover:underline">
-                        {v.plate}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {v.model} · {v.year}
-                      </p>
-                    </div>
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  <p className="text-sm text-foreground">
-                    {formatMzn(v.weightKg)} kg
-                  </p>
-                </TableCell>
-                <TableCell>
-                  <ColorCell color={v.color} />
-                </TableCell>
-                <TableCell>
-                  <StatusCell status={v.status} label={v.statusLabel} />
-                </TableCell>
-                <TableCell>
-                  <ComplianceCell compliance={v.compliance} />
-                </TableCell>
-                <TableCell>
-                  <OverdueAmountCell vehicle={v} />
-                </TableCell>
-                <TableCell className="pr-5 text-right">
-                  <ActionCell vehicle={v} />
-                </TableCell>
-              </TableRow>
+            vehicles.map((vehicle) => (
+              <FleetVehicleRow key={vehicle.id} vehicle={vehicle} />
             ))
           )}
         </TableBody>
@@ -266,146 +269,158 @@ function FleetTable({ vehicles }: { vehicles: Vehicle[] }) {
   )
 }
 
-function StatusCell({ status, label }: { status: Status; label: string }) {
-  const dotClass =
-    status === "active"
-      ? "bg-primary"
-      : status === "idle"
-        ? "bg-muted-foreground/50"
-        : status === "maintenance"
-          ? "bg-secondary"
-          : "bg-destructive/70"
+function FleetVehicleRow({ vehicle }: { vehicle: FleetVehicle }) {
+  const navigate = useNavigate()
+  const openDetail = () => {
+    navigate(`/fleet/${encodeURIComponent(vehicle.vehicleId)}`, {
+      state: { vehicle },
+    })
+  }
+  const createTrip = () => {
+    navigate(
+      `/pay-charges?vehicle=${encodeURIComponent(
+        vehicle.plateNumberSnapshot
+      )}&vehicleId=${encodeURIComponent(vehicle.vehicleId)}&step=charge`,
+      { state: { fleetVehicle: vehicle } }
+    )
+  }
+
   return (
-    <p className="flex items-center gap-2 text-sm text-foreground">
-      <span className={cn("size-1.5 shrink-0 rounded-full", dotClass)} />
-      {label}
-    </p>
+    <TableRow
+      tabIndex={0}
+      onClick={openDetail}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          openDetail()
+        }
+      }}
+      className="cursor-pointer border-border outline-none hover:bg-muted/40 focus-visible:bg-muted/40"
+    >
+      <TableCell className="pl-5">
+        <div className="py-1">
+          <p className="font-mono text-sm font-medium tracking-wide text-foreground hover:underline">
+            {vehicle.plateNumberSnapshot}
+          </p>
+          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+            {vehicle.truckNumberSnapshot}
+          </p>
+          <p className="mt-0.5 max-w-48 truncate font-mono text-[10px] text-muted-foreground/80">
+            {vehicle.vehicleId}
+          </p>
+        </div>
+      </TableCell>
+      <TableCell>
+        <p className="text-sm text-foreground">{vehicle.ownerNameSnapshot}</p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {vehicle.operatorNameSnapshot}
+        </p>
+      </TableCell>
+      <TableCell>
+        <p className="text-sm text-foreground">{formatCapacity(vehicle)}</p>
+      </TableCell>
+      <TableCell>
+        <p className="text-sm text-foreground">{capacityClassLabel(vehicle)}</p>
+      </TableCell>
+      <TableCell>
+        <StatusBadge value={vehicle.registryStatus} />
+      </TableCell>
+      <TableCell>
+        <ComplianceBadge compliant={vehicle.compliantForRating} />
+      </TableCell>
+      <TableCell className="pr-5 text-right">
+        <Button
+          size="sm"
+          onClick={(event) => {
+            event.stopPropagation()
+            createTrip()
+          }}
+          className="rounded-md"
+        >
+          <Plus className="size-3.5" />
+          Create trip
+        </Button>
+      </TableCell>
+    </TableRow>
   )
 }
 
-function OverdueAmountCell({ vehicle }: { vehicle: Vehicle }) {
-  if (vehicle.compliance.kind !== "overdue") {
-    return <span className="text-sm text-muted-foreground">—</span>
-  }
-  const penalty = calculatePenalty(vehicle)
+function LoadingRow() {
   return (
-    <p className="leading-tight">
-      <span className="text-sm font-semibold text-destructive tabular-nums">
-        {formatMzn(penalty)}
-        <span className="ml-1 text-[10px] font-medium text-destructive/70">MZN</span>
-      </span>
-      <span className="block text-[10px] text-muted-foreground">
-        {vehicle.compliance.daysOverdue}d × {formatMzn(vehicle.compliance.penaltyDailyMzn)} MZN/day
-      </span>
-    </p>
+    <TableRow>
+      <TableCell
+        colSpan={7}
+        className="py-12 text-center text-sm text-muted-foreground"
+      >
+        <span className="inline-flex items-center gap-2">
+          <Spinner />
+          Loading active fleet vehicles…
+        </span>
+      </TableCell>
+    </TableRow>
   )
 }
 
-function ComplianceCell({ compliance }: { compliance: Compliance }) {
-  const { label, badgeClass } = describeCompliance(compliance)
+function EmptyRow({ query }: { query: string }) {
   return (
-    <div className="flex flex-col gap-1 leading-tight">
-      <Badge variant="secondary" className={cn("px-2 py-0.5 text-[11px]", badgeClass)}>
-        {label}
-      </Badge>
-      <span className="text-[10px] text-muted-foreground">
-        Exp {compliance.expDate}
-      </span>
-    </div>
+    <TableRow>
+      <TableCell
+        colSpan={7}
+        className="py-12 text-center text-sm text-muted-foreground"
+      >
+        {query.trim()
+          ? "No active vehicles match this search."
+          : "No active vehicles found."}
+      </TableCell>
+    </TableRow>
   )
 }
 
-function describeCompliance(compliance: Compliance): {
-  label: string
-  badgeClass: string
-} {
-  switch (compliance.kind) {
-    case "compliant":
-      return { label: "Compliant", badgeClass: "bg-chart-1/60 text-primary" }
-    case "renewal-soon":
-      return {
-        label: `Renewal in ${compliance.daysLeft}d`,
-        badgeClass: "bg-accent text-accent-foreground",
-      }
-    case "overdue":
-      return {
-        label: `Overdue · ${compliance.daysOverdue}d`,
-        badgeClass: "bg-destructive/10 text-destructive",
-      }
-    case "expired":
-      return {
-        label: "Expired",
-        badgeClass: "bg-destructive/10 text-destructive",
-      }
-    case "disputed":
-      return {
-        label: "Disputed",
-        badgeClass: "bg-accent text-secondary",
-      }
-  }
-}
-
-type RowAction = {
-  label: string
-  Icon: typeof Plus
-  tone: "primary" | "destructive" | "muted"
-}
-
-function rowActionFor(v: Vehicle): RowAction {
-  // Overdue trumps everything — it's the most urgent settlement signal.
-  if (v.compliance.kind === "overdue" || v.compliance.kind === "expired") {
-    return { label: "Pay", Icon: CreditCard, tone: "destructive" }
-  }
-  if (v.activeTrip) {
-    return { label: "Top up", Icon: Plus, tone: "primary" }
-  }
-  return { label: "Start trip", Icon: Play, tone: "muted" }
-}
-
-function ActionCell({ vehicle }: { vehicle: Vehicle }) {
-  const action = rowActionFor(vehicle)
-  const Icon = action.Icon
+function ErrorRow({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   return (
-    <NavLink
-      to={`/pay-charges?vehicle=${encodeURIComponent(vehicle.plate)}`}
-      aria-label={`${action.label} · ${vehicle.plate}`}
+    <TableRow>
+      <TableCell colSpan={7} className="py-12 text-center">
+        <div className="mx-auto flex max-w-sm flex-col items-center gap-3">
+          <p className="text-sm font-medium text-foreground">
+            Could not load fleet vehicles.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {error instanceof Error ? error.message : "Try again."}
+          </p>
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            <RefreshCw className="size-3.5" />
+            Retry
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  )
+}
+
+function StatusBadge({ value }: { value: string }) {
+  return (
+    <Badge
+      variant="secondary"
+      className="bg-primary/10 px-2 py-0.5 text-[11px] text-primary"
+    >
+      {statusLabel(value)}
+    </Badge>
+  )
+}
+
+function ComplianceBadge({ compliant }: { compliant: boolean }) {
+  return (
+    <Badge
+      variant="secondary"
       className={cn(
-        "ml-auto inline-flex w-28 items-center justify-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-        action.tone === "destructive" &&
-          "border-destructive/30 bg-destructive/5 text-destructive hover:border-destructive/50 hover:bg-destructive/10",
-        action.tone === "primary" &&
-          "border-primary/30 bg-primary/5 text-primary hover:border-primary/50 hover:bg-primary/10",
-        action.tone === "muted" &&
-          "border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/5 hover:text-primary",
+        "px-2 py-0.5 text-[11px]",
+        compliant
+          ? "bg-chart-1/60 text-primary"
+          : "bg-destructive/10 text-destructive"
       )}
     >
-      <Icon className="size-3.5" />
-      {action.label}
-    </NavLink>
-  )
-}
-
-const COLOR_SWATCH: Record<string, string> = {
-  white: "bg-white border-border",
-  black: "bg-zinc-900 border-zinc-900",
-  red: "bg-red-500 border-red-500",
-  blue: "bg-blue-500 border-blue-500",
-  green: "bg-emerald-500 border-emerald-500",
-  yellow: "bg-yellow-400 border-yellow-400",
-  orange: "bg-orange-500 border-orange-500",
-  silver: "bg-zinc-300 border-zinc-300",
-}
-
-function ColorCell({ color }: { color: string }) {
-  const swatch = COLOR_SWATCH[color.toLowerCase()] ?? "bg-muted border-border"
-  return (
-    <div className="flex items-center gap-2">
-      <span
-        aria-hidden
-        className={cn("size-3.5 shrink-0 rounded-full border", swatch)}
-      />
-      <span className="text-sm text-foreground">{color}</span>
-    </div>
+      {compliant ? "Compliant" : "Not compliant"}
+    </Badge>
   )
 }
 
@@ -424,7 +439,7 @@ function FleetMapPlaceholder({ count }: { count: number }) {
         </div>
         <Badge
           variant="secondary"
-          className="bg-card text-foreground px-2 py-0.5 text-[11px]"
+          className="bg-card px-2 py-0.5 text-[11px] text-foreground"
         >
           {count} vehicle{count === 1 ? "" : "s"}
         </Badge>

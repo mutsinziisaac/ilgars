@@ -28,24 +28,18 @@ import {
   Wallet,
   XCircle,
 } from "lucide-react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import type { DateRange } from "react-day-picker"
 
+import { useAuth } from "@/components/auth/auth-context"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@/components/ui/field"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  VerticalStepper,
-  type Step,
-} from "@/components/fleet/vertical-stepper"
+import { VerticalStepper, type Step } from "@/components/fleet/vertical-stepper"
 import { VehicleIllustration } from "@/components/fleet/vehicle-illustration"
 import { StatusPill } from "@/components/fleet/status-pill"
 import {
@@ -88,6 +82,9 @@ import {
   submitApplication,
   type LicenceApplication,
 } from "@/lib/authorisations"
+import type { FleetVehicle } from "@/lib/fleet-vehicles-api"
+import { capacityTonnes } from "@/lib/fleet-vehicle-classification"
+import { createTrip, MUNICIPALITY_ID } from "@/lib/trips-api"
 import { cn } from "@/lib/utils"
 
 type StepKey =
@@ -107,27 +104,57 @@ type WizardPath = "pay-now" | "submit-application"
 
 const PAY_NOW_VISIBLE_STEPS: readonly Step<StepKey>[] = [
   { key: "vehicle", label: "Vehicle", description: "Select from your fleet" },
-  { key: "charge", label: "Charge & duration", description: "Pick licence + dates" },
+  {
+    key: "charge",
+    label: "Charge & duration",
+    description: "Pick licence + dates",
+  },
   { key: "invoice", label: "Invoice", description: "Review fees + deadline" },
-  { key: "payment", label: "Payment method", description: "Mobile, card, wallet" },
+  {
+    key: "payment",
+    label: "Payment method",
+    description: "Mobile, card, wallet",
+  },
 ]
 
 const SUBMIT_VISIBLE_STEPS: readonly Step<StepKey>[] = [
   { key: "vehicle", label: "Vehicle", description: "Select from your fleet" },
-  { key: "route", label: "Route", description: "Designated · port · or off-list" },
-  { key: "window", label: "Operating window", description: "Dates · time window" },
-  { key: "attachments", label: "Attachments", description: "Required for exceptional" },
-  { key: "review", label: "Review & submit", description: "Lodge for verification" },
+  {
+    key: "route",
+    label: "Route",
+    description: "Designated · port · or off-list",
+  },
+  {
+    key: "window",
+    label: "Operating window",
+    description: "Dates · time window",
+  },
+  {
+    key: "attachments",
+    label: "Attachments",
+    description: "Required for exceptional",
+  },
+  {
+    key: "review",
+    label: "Review & submit",
+    description: "Lodge for verification",
+  },
 ]
 
-function visibleStepsFor(path: WizardPath, licenceType: LicenceType | null): readonly Step<StepKey>[] {
+function visibleStepsFor(
+  path: WizardPath,
+  licenceType: LicenceType | null
+): readonly Step<StepKey>[] {
   if (path === "pay-now") return PAY_NOW_VISIBLE_STEPS
   // Attachments only appear for EXCEPTIONAL.
   if (licenceType === "EXCEPTIONAL") return SUBMIT_VISIBLE_STEPS
   return SUBMIT_VISIBLE_STEPS.filter((s) => s.key !== "attachments")
 }
 
-function stepIndex(path: WizardPath, licenceType: LicenceType | null): Record<StepKey, number> {
+function stepIndex(
+  path: WizardPath,
+  licenceType: LicenceType | null
+): Record<StepKey, number> {
   // Indices are only consulted for back-navigation; out-of-path keys map to -1.
   const visible = visibleStepsFor(path, licenceType).map((s) => s.key)
   const map: Partial<Record<StepKey, number>> = {}
@@ -168,9 +195,24 @@ const PAYMENT_CHANNELS: {
   subtitle: string
   icon: typeof Smartphone
 }[] = [
-  { key: "mobile", title: "Mobile money", subtitle: "M-Pesa · e-Mola · mKesh", icon: Smartphone },
-  { key: "card", title: "Card", subtitle: "Visa, Mastercard", icon: CreditCard },
-  { key: "wallet", title: "Wallet", subtitle: `Balance ${formatMzn(WALLET_BALANCE_MZN)} MZN`, icon: Wallet },
+  {
+    key: "mobile",
+    title: "Mobile money",
+    subtitle: "M-Pesa · e-Mola · mKesh",
+    icon: Smartphone,
+  },
+  {
+    key: "card",
+    title: "Card",
+    subtitle: "Visa, Mastercard",
+    icon: CreditCard,
+  },
+  {
+    key: "wallet",
+    title: "Wallet",
+    subtitle: `Balance ${formatMzn(WALLET_BALANCE_MZN)} MZN`,
+    icon: Wallet,
+  },
 ]
 
 function paymentChannelLabel(channel: PaymentChannel): string {
@@ -197,6 +239,10 @@ type FormState = {
   application: LicenceApplication | null
 }
 
+type PayChargesLocationState = {
+  fleetVehicle?: FleetVehicle
+}
+
 const today0 = startOfDay(new Date(2026, 4, 4)) // Mon 4 May 2026 — match the spec's reference date
 const initialEnd = addDays(today0, 4)
 const CURRENT_PERIOD = format(today0, "yyyy-MM")
@@ -214,16 +260,69 @@ const INITIAL_STATE: FormState = {
   application: null,
 }
 
+function adaptFleetVehicleForPayment(vehicle: FleetVehicle): Vehicle {
+  const tonnes = Math.max(1, capacityTonnes(vehicle))
+  const weightKg = Math.round(tonnes * 1000)
+  const vehicleStatusLabel = vehicle.status
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+
+  return {
+    plate: vehicle.plateNumberSnapshot,
+    ref: vehicle.vehicleId,
+    model: vehicle.truckNumberSnapshot || "Fleet vehicle",
+    year: new Date(vehicle.vehicleSnapshotAt || vehicle.addedAt).getFullYear(),
+    axles: 2,
+    configuration: "Rigid",
+    weightKg,
+    color: "Fleet",
+    rucClass: tonnes > 8 ? "Heavy vehicle" : "Medium vehicle",
+    chassisVin: vehicle.vehicleId,
+    engineNumber: vehicle.id,
+    logbookRef: vehicle.registryStatus,
+    odometerKm: 0,
+    status: vehicle.status === "ACTIVE" ? "active" : "idle",
+    statusLabel: vehicleStatusLabel,
+    compliance: vehicle.compliantForRating
+      ? { kind: "compliant", expDate: "Not provided" }
+      : { kind: "expired", expDate: "Not provided" },
+    driver: null,
+    authorisedDrivers: [],
+    mtdSpend: 0,
+    renewalFee: 0,
+    activeTrip: null,
+    recentTrips: [],
+    documents: [],
+    complianceSeries: [],
+    trackingDevice: null,
+  }
+}
+
 export default function PayCharges() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const { user } = useAuth()
   const [params, setParams] = useSearchParams()
   const stepParam = (params.get("step") ?? "vehicle") as StepKey
   const preselectedPlate = params.get("vehicle")
+  const preselectedVehicleId = params.get("vehicleId")
+  const stateFleetVehicle = (location.state as PayChargesLocationState | null)
+    ?.fleetVehicle
 
   const [form, setForm] = useState<FormState>(() => {
     if (preselectedPlate) {
       const v = findVehicleByPlate(preselectedPlate)
       if (v) return { ...INITIAL_STATE, vehicle: v }
+    }
+    if (stateFleetVehicle) {
+      return {
+        ...INITIAL_STATE,
+        vehicle: adaptFleetVehicleForPayment(stateFleetVehicle),
+        durationDays: 2,
+        range: { from: today0, to: addDays(today0, 1) },
+      }
     }
     return INITIAL_STATE
   })
@@ -232,7 +331,9 @@ export default function PayCharges() {
   const weightCategory: WeightCategory | null = form.vehicle
     ? classifyFleetVehicle(form.vehicle)
     : null
-  const route: Route | null = form.routeCode ? lookupRoute(form.routeCode) ?? null : null
+  const route: Route | null = form.routeCode
+    ? (lookupRoute(form.routeCode) ?? null)
+    : null
   const decision: AccessDecision | null = weightCategory
     ? evaluateAccess({
         weightCategory,
@@ -247,20 +348,37 @@ export default function PayCharges() {
 
   // Vehicle was selected upstream (from the fleet table) — skip the in-wizard vehicle step.
   const vehiclePreselected = !!preselectedPlate && !!form.vehicle
-  const entryStepFor = (p: WizardPath): StepKey => (p === "submit-application" ? "route" : "charge")
+  const entryStepFor = (p: WizardPath): StepKey =>
+    p === "submit-application" ? "route" : "charge"
 
   // Validate the URL step against the current path; snap to a sensible step when the URL is
   // out of sync with the active path or when the vehicle was preselected from the fleet.
   const step: StepKey = (() => {
     // Preselected: never show the vehicle picker; jump straight to the path's entry step.
-    if (vehiclePreselected && (stepParam === "vehicle" || indexMap[stepParam] === undefined)) {
+    if (
+      vehiclePreselected &&
+      (stepParam === "vehicle" || indexMap[stepParam] === undefined)
+    ) {
       return entryStepFor(path)
     }
     if (indexMap[stepParam] === undefined) return "vehicle"
-    if (path === "pay-now" && (stepParam === "route" || stepParam === "window" || stepParam === "attachments" || stepParam === "review" || stepParam === "submitted")) {
+    if (
+      path === "pay-now" &&
+      (stepParam === "route" ||
+        stepParam === "window" ||
+        stepParam === "attachments" ||
+        stepParam === "review" ||
+        stepParam === "submitted")
+    ) {
       return vehiclePreselected ? "charge" : "vehicle"
     }
-    if (path === "submit-application" && (stepParam === "charge" || stepParam === "invoice" || stepParam === "payment" || stepParam === "receipt")) {
+    if (
+      path === "submit-application" &&
+      (stepParam === "charge" ||
+        stepParam === "invoice" ||
+        stepParam === "payment" ||
+        stepParam === "receipt")
+    ) {
       return vehiclePreselected ? "route" : "vehicle"
     }
     return stepParam
@@ -285,7 +403,8 @@ export default function PayCharges() {
       navigate(-1)
       return
     }
-    const prev = visibleSteps[Math.max(0, Math.min(i - 1, visibleSteps.length - 1))]
+    const prev =
+      visibleSteps[Math.max(0, Math.min(i - 1, visibleSteps.length - 1))]
     // When the vehicle was preselected from the fleet, the vehicle step is read-only context
     // in the rail; back-navigation should exit the wizard rather than re-enter selection.
     if (vehiclePreselected && prev.key === "vehicle") {
@@ -299,6 +418,20 @@ export default function PayCharges() {
     if (!form.vehicle) return
     const opt = activeOption(form)
     if (!opt) return
+    const tripVehicleId = preselectedVehicleId?.trim()
+    if (!tripVehicleId) {
+      toast.error("Vehicle ID missing", {
+        description:
+          "Open Pay Road User Charges from a fleet vehicle before creating a trip.",
+      })
+      return
+    }
+    if (!MUNICIPALITY_ID) {
+      toast.error("Municipality ID missing", {
+        description: "Set VITE_MUNICIPALITY_ID in the environment.",
+      })
+      return
+    }
 
     const subtotal = orderSubtotal(form)
     const cap = Math.min(subtotal, MONTHLY_CAP_MZN)
@@ -309,9 +442,7 @@ export default function PayCharges() {
     const toIso = (form.range.to ?? form.range.from ?? today0).toISOString()
     const tier = cargoTierForVehicle(form.vehicle)
     const category =
-      opt.kind === "cargo"
-        ? `Cargo licence · ${tier.label}`
-        : opt.title
+      opt.kind === "cargo" ? `Cargo licence · ${tier.label}` : opt.title
 
     goTo("processing")
     const result = await simulatePaymentResult({
@@ -329,7 +460,31 @@ export default function PayCharges() {
       status: form.channel === "bank" ? "pending-reconciliation" : "paid",
     })
     setForm((f) => ({ ...f, result }))
-    goTo(result.kind === "failure" ? "payment" : "receipt")
+    if (result.kind === "failure") {
+      goTo("payment")
+      return
+    }
+
+    try {
+      await createTrip({
+        vehicleId: tripVehicleId,
+        municipalityId: MUNICIPALITY_ID,
+        paymentMode: "PREPAID",
+        createdBy: user.displayName,
+        reason: "pre-declared before Maputo entry",
+        expectedDurationDays: opt.kind === "special" ? 30 : form.durationDays,
+      })
+      toast.success("Trip created", {
+        description: `${form.vehicle.plate} was pre-declared for Maputo entry.`,
+      })
+      goTo("receipt")
+    } catch (error) {
+      toast.error("Trip creation failed", {
+        description:
+          error instanceof Error ? error.message : "Try again before leaving.",
+      })
+      goTo("payment")
+    }
   }
 
   const submitForReview = async () => {
@@ -352,7 +507,8 @@ export default function PayCharges() {
     goTo("submitted")
   }
 
-  const isTerminal = step === "processing" || step === "receipt" || step === "submitted"
+  const isTerminal =
+    step === "processing" || step === "receipt" || step === "submitted"
   const showRail = !isTerminal
 
   return (
@@ -387,14 +543,16 @@ export default function PayCharges() {
               setForm({
                 ...INITIAL_STATE,
                 vehicle: v,
-                chargeKind: defaultChargeForVehicle(v),
+                chargeKind: defaultChargeForVehicle(),
                 routeCode: null,
                 attachments: {},
                 application: null,
                 durationDays: cat === "RESTRICTED_HEAVY" ? 1 : 5,
               })
             }}
-            onContinue={() => goTo(weightCategory === "RESTRICTED_HEAVY" ? "route" : "charge")}
+            onContinue={() =>
+              goTo(weightCategory === "RESTRICTED_HEAVY" ? "route" : "charge")
+            }
           />
         )}
 
@@ -453,30 +611,36 @@ export default function PayCharges() {
             }}
           />
         )}
-        {step === "attachments" && form.vehicle && path === "submit-application" && (
-          <AttachmentsStep
-            form={form}
-            setForm={setForm}
-            onBack={back}
-            onContinue={() => goTo("review")}
-          />
-        )}
-        {step === "review" && form.vehicle && path === "submit-application" && route && decision && (
-          <ReviewSubmitStep
-            form={form}
-            decision={decision}
-            route={route}
-            onBack={back}
-            onSubmit={submitForReview}
-          />
-        )}
+        {step === "attachments" &&
+          form.vehicle &&
+          path === "submit-application" && (
+            <AttachmentsStep
+              form={form}
+              setForm={setForm}
+              onBack={back}
+              onContinue={() => goTo("review")}
+            />
+          )}
+        {step === "review" &&
+          form.vehicle &&
+          path === "submit-application" &&
+          route &&
+          decision && (
+            <ReviewSubmitStep
+              form={form}
+              decision={decision}
+              route={route}
+              onBack={back}
+              onSubmit={submitForReview}
+            />
+          )}
 
         {step === "processing" && form.vehicle && path === "pay-now" && (
           <ProcessingStep form={form} />
         )}
-        {step === "processing" && form.vehicle && path === "submit-application" && (
-          <SubmittingStep />
-        )}
+        {step === "processing" &&
+          form.vehicle &&
+          path === "submit-application" && <SubmittingStep />}
         {step === "receipt" && form.vehicle && form.result && (
           <ReceiptStep
             result={form.result}
@@ -517,7 +681,7 @@ export default function PayCharges() {
                               : "charge"
                             : step === "charge"
                               ? "invoice"
-                              : "payment",
+                              : "payment"
                         )
                 }
                 primaryDisabled={
@@ -540,10 +704,10 @@ export default function PayCharges() {
                 if (step === "vehicle") goTo("route")
                 else if (step === "route") goTo("window")
                 else if (step === "window") {
-                  if (decision?.licenceType === "EXCEPTIONAL") goTo("attachments")
+                  if (decision?.licenceType === "EXCEPTIONAL")
+                    goTo("attachments")
                   else goTo("review")
-                }
-                else if (step === "attachments") goTo("review")
+                } else if (step === "attachments") goTo("review")
                 else if (step === "review") void submitForReview()
               }}
               primaryDisabled={
@@ -561,7 +725,9 @@ export default function PayCharges() {
                             durationDays: form.durationDays,
                             attachments: form.attachments,
                             deviceActive: true,
-                            hasOpenPostpaidBalance: hasOpenPostpaidBalance(form.vehicle!),
+                            hasOpenPostpaidBalance: hasOpenPostpaidBalance(
+                              form.vehicle!
+                            ),
                           }).length > 0
                         : false
               }
@@ -578,7 +744,7 @@ function cargoTierForVehicle(v: Vehicle) {
   return weightTierForKg(v.weightKg) ?? WEIGHT_TIERS[0]
 }
 
-function defaultChargeForVehicle(_v: Vehicle): ChargeKind {
+function defaultChargeForVehicle(): ChargeKind {
   return "cargo"
 }
 
@@ -605,7 +771,10 @@ function chargeOptionsFor(v: Vehicle): ChargeOption[] {
 
 function activeOption(form: FormState): ChargeOption | null {
   if (!form.vehicle) return null
-  return chargeOptionsFor(form.vehicle).find((o) => o.kind === form.chargeKind) ?? null
+  return (
+    chargeOptionsFor(form.vehicle).find((o) => o.kind === form.chargeKind) ??
+    null
+  )
 }
 
 function orderSubtotal(form: FormState): number {
@@ -674,7 +843,9 @@ function VehicleStep({
   }, [query])
 
   const trimmedQuery = query.trim()
-  const looksLikePlate = /^[A-Z]{3} \d{3} MC$/.test(normalisePlate(trimmedQuery))
+  const looksLikePlate = /^[A-Z]{3} \d{3} MC$/.test(
+    normalisePlate(trimmedQuery)
+  )
   const showUnregisteredCta = filtered.length === 0 && looksLikePlate
 
   return (
@@ -697,7 +868,8 @@ function VehicleStep({
       )}
       {filtered.length === 0 && !looksLikePlate && (
         <p className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-6 text-center text-xs text-muted-foreground">
-          No vehicles match "{trimmedQuery}". Try a plate (e.g. <span className="font-mono">AAB 482 MC</span>) or driver name.
+          No vehicles match "{trimmedQuery}". Try a plate (e.g.{" "}
+          <span className="font-mono">AAB 482 MC</span>) or driver name.
         </p>
       )}
       {filtered.length > 0 && (
@@ -757,9 +929,15 @@ function compliancePill(v: Vehicle): {
     case "compliant":
       return { tone: "compliant", label: "Compliant" }
     case "renewal-soon":
-      return { tone: "renewal-soon", label: `Renewal in ${v.compliance.daysLeft}d` }
+      return {
+        tone: "renewal-soon",
+        label: `Renewal in ${v.compliance.daysLeft}d`,
+      }
     case "overdue":
-      return { tone: "critical", label: `Overdue · ${v.compliance.daysOverdue}d` }
+      return {
+        tone: "critical",
+        label: `Overdue · ${v.compliance.daysOverdue}d`,
+      }
     case "expired":
       return { tone: "critical", label: "Expired" }
     case "disputed":
@@ -779,8 +957,8 @@ function UnregisteredVehicleCard({ plate }: { plate: string }) {
           {plate} isn't in your fleet yet
         </p>
         <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-          Register it now (we'll pull logbook data from MVR if available) and resume payment when
-          you're done.
+          Register it now (we'll pull logbook data from MVR if available) and
+          resume payment when you're done.
         </p>
       </div>
       <Button asChild size="sm" className="rounded-md">
@@ -858,7 +1036,9 @@ function ChargeStep({
               key={option.kind}
               option={option}
               selected={form.chargeKind === option.kind}
-              onSelect={() => setForm((f) => ({ ...f, chargeKind: option.kind }))}
+              onSelect={() =>
+                setForm((f) => ({ ...f, chargeKind: option.kind }))
+              }
             />
           ))}
         </div>
@@ -933,10 +1113,12 @@ function ChargeStep({
               Overdue
             </span>
             <span>
-              {format(overdueRange.from, "d MMM")} – {format(overdueRange.to, "d MMM yyyy")} ·
-              {" "}
-              {vehicle.compliance.kind === "overdue" ? vehicle.compliance.daysOverdue : 0} days
-              past last licence expiry. Penalty accrues until paid.
+              {format(overdueRange.from, "d MMM")} –{" "}
+              {format(overdueRange.to, "d MMM yyyy")} ·{" "}
+              {vehicle.compliance.kind === "overdue"
+                ? vehicle.compliance.daysOverdue
+                : 0}{" "}
+              days past last licence expiry. Penalty accrues until paid.
             </span>
           </div>
         )}
@@ -989,14 +1171,18 @@ function ChargeOptionCard({
       </span>
       <span className="flex flex-1 flex-col gap-0.5">
         <span className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">{option.title}</span>
+          <span className="text-sm font-semibold text-foreground">
+            {option.title}
+          </span>
           {option.recommended && (
             <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold tracking-wide text-secondary-foreground uppercase">
               Recommended
             </span>
           )}
         </span>
-        <span className="text-[11px] text-muted-foreground">{option.subtitle}</span>
+        <span className="text-[11px] text-muted-foreground">
+          {option.subtitle}
+        </span>
         {option.disabled && option.disabledReason && (
           <span className="mt-1 text-[11px] text-muted-foreground/70">
             {option.disabledReason}
@@ -1105,12 +1291,16 @@ function PaymentStep({
                   <Icon className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-foreground">{channel.title}</p>
-                  <p className="text-[11px] text-muted-foreground">{channel.subtitle}</p>
+                  <p className="text-sm font-semibold text-foreground">
+                    {channel.title}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {channel.subtitle}
+                  </p>
                   {disabled && (
                     <p className="mt-1 text-[11px] text-secondary">
-                      Wallet balance is {formatMzn(WALLET_BALANCE_MZN)} MZN — short by{" "}
-                      {formatMzn(total - WALLET_BALANCE_MZN)} MZN.
+                      Wallet balance is {formatMzn(WALLET_BALANCE_MZN)} MZN —
+                      short by {formatMzn(total - WALLET_BALANCE_MZN)} MZN.
                     </p>
                   )}
                 </div>
@@ -1121,7 +1311,9 @@ function PaymentStep({
                     selected ? "border-primary" : "border-muted-foreground/30"
                   )}
                 >
-                  {selected && <span className="size-2 rounded-full bg-primary" />}
+                  {selected && (
+                    <span className="size-2 rounded-full bg-primary" />
+                  )}
                 </span>
               </button>
             )
@@ -1139,7 +1331,8 @@ function PaymentStep({
               className="font-mono tracking-wide"
             />
             <FieldDescription>
-              We'll send a USSD prompt to authorise the {formatMzn(total)} MZN debit.
+              We'll send a USSD prompt to authorise the {formatMzn(total)} MZN
+              debit.
             </FieldDescription>
           </Field>
         )}
@@ -1147,7 +1340,11 @@ function PaymentStep({
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_1fr_1fr]">
             <Field>
               <FieldLabel htmlFor="card-number">Card number</FieldLabel>
-              <Input id="card-number" placeholder="0000 0000 0000 0000" className="font-mono" />
+              <Input
+                id="card-number"
+                placeholder="0000 0000 0000 0000"
+                className="font-mono"
+              />
             </Field>
             <Field>
               <FieldLabel htmlFor="card-exp">Expires</FieldLabel>
@@ -1162,7 +1359,12 @@ function PaymentStep({
       </Card>
 
       <div className="flex items-center justify-between gap-3 pt-2">
-        <Button variant="outline" size="lg" onClick={onBack} className="rounded-lg">
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={onBack}
+          className="rounded-lg"
+        >
           <ArrowLeft />
           Back to invoice
         </Button>
@@ -1173,7 +1375,9 @@ function PaymentStep({
           className="rounded-lg bg-primary"
         >
           <ShieldCheck />
-          {failure ? `Retry payment · ${formatMzn(total)} MZN` : `Pay ${formatMzn(total)} MZN`}
+          {failure
+            ? `Retry payment · ${formatMzn(total)} MZN`
+            : `Pay ${formatMzn(total)} MZN`}
         </Button>
       </div>
     </>
@@ -1196,13 +1400,25 @@ function PaymentFailureCard({
       </span>
       <div className="flex-1">
         <p className="text-sm font-semibold text-foreground">Payment failed</p>
-        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{reason}</p>
+        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+          {reason}
+        </p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" className="rounded-md" onClick={() => void onRetry()}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-md"
+            onClick={() => void onRetry()}
+          >
             <RefreshCcw className="size-3.5" />
             Retry
           </Button>
-          <Button size="sm" variant="ghost" className="rounded-md" onClick={onChangeMethod}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="rounded-md"
+            onClick={onChangeMethod}
+          >
             Choose different method
           </Button>
         </div>
@@ -1256,7 +1472,7 @@ function OrderSummary({
           value={
             opt?.kind === "cargo" && tier
               ? `Cargo · ${tier.label}`
-              : opt?.title ?? "—"
+              : (opt?.title ?? "—")
           }
         />
         <SummaryLine
@@ -1360,8 +1576,8 @@ function CapApplies() {
       <div>
         <p className="text-sm font-semibold text-foreground">Cap applies</p>
         <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-          Monthly charges across all categories are capped at {formatMzn(MONTHLY_CAP_MZN)} MZN per
-          UC-004 BR-A3.
+          Monthly charges across all categories are capped at{" "}
+          {formatMzn(MONTHLY_CAP_MZN)} MZN per UC-004 BR-A3.
         </p>
       </div>
     </div>
@@ -1377,9 +1593,12 @@ function NoVehicleNotice({ onPick }: { onPick: () => void }) {
           <Truck className="size-4" />
         </span>
         <div className="flex-1">
-          <p className="text-sm font-semibold text-foreground">Pick a vehicle first</p>
+          <p className="text-sm font-semibold text-foreground">
+            Pick a vehicle first
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Tariffs depend on the vehicle's MVR weight class. Go back to step 1 to choose one.
+            Tariffs depend on the vehicle's MVR weight class. Go back to step 1
+            to choose one.
           </p>
         </div>
         <Button size="sm" onClick={onPick} className="rounded-md">
@@ -1448,11 +1667,21 @@ function Footer({
 }) {
   return (
     <div className="flex items-center justify-between gap-3 pt-2">
-      <Button variant="outline" size="lg" onClick={onBack} className="rounded-lg">
+      <Button
+        variant="outline"
+        size="lg"
+        onClick={onBack}
+        className="rounded-lg"
+      >
         <ArrowLeft />
         {backLabel}
       </Button>
-      <Button size="lg" onClick={onContinue} disabled={disabled} className="rounded-lg">
+      <Button
+        size="lg"
+        onClick={onContinue}
+        disabled={disabled}
+        className="rounded-lg"
+      >
         {continueLabel}
         <ArrowRight />
       </Button>
@@ -1492,9 +1721,10 @@ function InvoiceStep({
               Settle the open postpaid balance first (VL-11)
             </p>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-              {vehicle.plate} has an unsettled postpaid accrual. Per VL-11, a new licence cannot
-              be issued until the existing balance is paid down to zero. The penalty below is the
-              accrued amount carried forward.
+              {vehicle.plate} has an unsettled postpaid accrual. Per VL-11, a
+              new licence cannot be issued until the existing balance is paid
+              down to zero. The penalty below is the accrued amount carried
+              forward.
             </p>
           </div>
         </div>
@@ -1508,9 +1738,9 @@ function InvoiceStep({
               Already paid for {format(today0, "MMMM yyyy")}
             </p>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-              An active Circulation Licence covers {vehicle.plate} for this period (BR-004-07).
-              Continuing will create a duplicate transaction — confirm the operator's intent before
-              proceeding.
+              An active Circulation Licence covers {vehicle.plate} for this
+              period (BR-004-07). Continuing will create a duplicate transaction
+              — confirm the operator's intent before proceeding.
             </p>
           </div>
         </div>
@@ -1524,10 +1754,21 @@ function InvoiceStep({
               Overdue penalty applies
             </p>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-              Last licence expired {vehicle.compliance.kind === "overdue" ? vehicle.compliance.expDate : "—"} ·
-              {" "}
-              {vehicle.compliance.kind === "overdue" ? vehicle.compliance.daysOverdue : 0} days overdue
-              at {formatMzn(vehicle.compliance.kind === "overdue" ? vehicle.compliance.penaltyDailyMzn : 0)} MZN/day.
+              Last licence expired{" "}
+              {vehicle.compliance.kind === "overdue"
+                ? vehicle.compliance.expDate
+                : "—"}{" "}
+              ·{" "}
+              {vehicle.compliance.kind === "overdue"
+                ? vehicle.compliance.daysOverdue
+                : 0}{" "}
+              days overdue at{" "}
+              {formatMzn(
+                vehicle.compliance.kind === "overdue"
+                  ? vehicle.compliance.penaltyDailyMzn
+                  : 0
+              )}{" "}
+              MZN/day.
             </p>
           </div>
         </div>
@@ -1554,12 +1795,6 @@ function InvoiceStep({
   )
 }
 
-function invoiceNumberFor(plate: string, anchor: Date): string {
-  const compact = plate.replace(/\s+/g, "")
-  const yyyymm = format(anchor, "yyyyMM")
-  return `PROF-${yyyymm}-${compact}`
-}
-
 function InvoiceDocument({
   vehicle,
   form,
@@ -1579,29 +1814,31 @@ function InvoiceDocument({
   tier: { label: string; mznPerDay: number }
   isMonthly: boolean
 }) {
-  const invoiceNumber = invoiceNumberFor(vehicle.plate, today0)
-  const issued = today0
   const due = PAYMENT_DEADLINE
   const fromDate = form.range.from ?? today0
   const toDate = form.range.to ?? form.range.from ?? today0
   const overdueDays =
     vehicle.compliance.kind === "overdue" ? vehicle.compliance.daysOverdue : 0
   const overduePenaltyDaily =
-    vehicle.compliance.kind === "overdue" ? vehicle.compliance.penaltyDailyMzn : 0
+    vehicle.compliance.kind === "overdue"
+      ? vehicle.compliance.penaltyDailyMzn
+      : 0
 
   return (
     <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       {/* Letterhead */}
       <header className="flex flex-wrap items-start justify-between gap-6 border-b border-border bg-sidebar p-6 text-sidebar-foreground">
         <div className="flex items-start gap-3">
-          <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
-            <span className="font-mono text-base font-bold">CMM</span>
-          </span>
+          <img
+            src="/maputo-logo.webp"
+            alt="Município de Maputo"
+            className="size-14 shrink-0 rounded-lg bg-card object-contain p-1"
+          />
           <div>
             <p className="text-[10px] font-semibold tracking-widest text-secondary uppercase">
               República de Moçambique
             </p>
-            <p className="mt-0.5 text-base font-semibold leading-tight">
+            <p className="mt-0.5 text-base leading-tight font-semibold">
               Conselho Municipal de Maputo
             </p>
             <p className="text-[11px] leading-snug text-sidebar-foreground/70">
@@ -1610,18 +1847,6 @@ function InvoiceDocument({
               Praça da Independência, Maputo · NUIT 400 412 985
             </p>
           </div>
-        </div>
-
-        <div className="text-right">
-          <p className="text-[10px] font-semibold tracking-[0.25em] text-secondary uppercase">
-            Proforma Invoice
-          </p>
-          <p className="mt-1 font-mono text-lg font-semibold tracking-wider">
-            {invoiceNumber}
-          </p>
-          <p className="text-[11px] text-sidebar-foreground/70">
-            Issued {format(issued, "d MMM yyyy")} · Due {format(due, "d MMM yyyy")}
-          </p>
         </div>
       </header>
 
@@ -1641,7 +1866,11 @@ function InvoiceDocument({
           </p>
         </div>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
-          <InvoiceMeta label="Vehicle" value={`${vehicle.plate} · ${vehicle.model}`} mono />
+          <InvoiceMeta
+            label="Vehicle"
+            value={`${vehicle.plate} · ${vehicle.model}`}
+            mono
+          />
           <InvoiceMeta
             label="Class"
             value={`${tier.label} (${formatMzn(vehicle.weightKg)} kg)`}
@@ -1687,37 +1916,45 @@ function InvoiceDocument({
             <tbody className="divide-y divide-border">
               <tr>
                 <td className="px-4 py-3">
-                  <p className="font-medium text-foreground">{categoryLabel(form)}</p>
+                  <p className="font-medium text-foreground">
+                    {categoryLabel(form)}
+                  </p>
                   <p className="text-[11px] text-muted-foreground">
                     {isMonthly
                       ? "Monthly Special Circulation Licence — covers all categories within the cap."
                       : `Daily tariff resolved from Annex I (FE-04) for the ${tier.label} weight band.`}
                   </p>
                 </td>
-                <td className="px-3 py-3 text-right tabular-nums text-foreground">
+                <td className="px-3 py-3 text-right text-foreground tabular-nums">
                   {isMonthly ? "1 mo" : `${form.durationDays} d`}
                 </td>
-                <td className="px-3 py-3 text-right tabular-nums text-foreground">
+                <td className="px-3 py-3 text-right text-foreground tabular-nums">
                   {isMonthly
                     ? `${formatMzn(subtotal)} MZN`
                     : `${formatMzn(tier.mznPerDay)} MZN`}
                 </td>
-                <td className="px-4 py-3 text-right font-semibold tabular-nums text-foreground">
+                <td className="px-4 py-3 text-right font-semibold text-foreground tabular-nums">
                   {formatMzn(subtotal)} MZN
                 </td>
               </tr>
               {adjustment > 0 && (
                 <tr>
                   <td className="px-4 py-3">
-                    <p className="font-medium text-secondary">Monthly cap adjustment</p>
+                    <p className="font-medium text-secondary">
+                      Monthly cap adjustment
+                    </p>
                     <p className="text-[11px] text-muted-foreground">
-                      BR-004-05 — total monthly charges across categories cannot exceed{" "}
-                      {formatMzn(MONTHLY_CAP_MZN)} MZN.
+                      BR-004-05 — total monthly charges across categories cannot
+                      exceed {formatMzn(MONTHLY_CAP_MZN)} MZN.
                     </p>
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">—</td>
-                  <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">—</td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-secondary">
+                  <td className="px-3 py-3 text-right text-muted-foreground tabular-nums">
+                    —
+                  </td>
+                  <td className="px-3 py-3 text-right text-muted-foreground tabular-nums">
+                    —
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold text-secondary tabular-nums">
                     −{formatMzn(adjustment)} MZN
                   </td>
                 </tr>
@@ -1725,18 +1962,21 @@ function InvoiceDocument({
               {penalty > 0 && (
                 <tr>
                   <td className="px-4 py-3">
-                    <p className="font-medium text-destructive">Overdue penalty</p>
+                    <p className="font-medium text-destructive">
+                      Overdue penalty
+                    </p>
                     <p className="text-[11px] text-muted-foreground">
-                      Daily accrual on the prior unsettled licence period (TX-05).
+                      Daily accrual on the prior unsettled licence period
+                      (TX-05).
                     </p>
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums text-foreground">
+                  <td className="px-3 py-3 text-right text-foreground tabular-nums">
                     {overdueDays} d
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums text-foreground">
+                  <td className="px-3 py-3 text-right text-foreground tabular-nums">
                     {formatMzn(overduePenaltyDaily)} MZN
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-destructive">
+                  <td className="px-4 py-3 text-right font-semibold text-destructive tabular-nums">
                     +{formatMzn(penalty)} MZN
                   </td>
                 </tr>
@@ -1751,7 +1991,9 @@ function InvoiceDocument({
         <dl className="w-full max-w-xs space-y-1.5 text-sm">
           <div className="flex items-center justify-between">
             <dt className="text-muted-foreground">Subtotal</dt>
-            <dd className="tabular-nums text-foreground">{formatMzn(subtotal)} MZN</dd>
+            <dd className="text-foreground tabular-nums">
+              {formatMzn(subtotal)} MZN
+            </dd>
           </div>
           {adjustment > 0 && (
             <div className="flex items-center justify-between text-secondary">
@@ -1767,11 +2009,15 @@ function InvoiceDocument({
           )}
           <div className="flex items-center justify-between border-t border-border pt-2">
             <dt className="text-xs text-muted-foreground">VAT</dt>
-            <dd className="text-xs tabular-nums text-muted-foreground">Included</dd>
+            <dd className="text-xs text-muted-foreground tabular-nums">
+              Included
+            </dd>
           </div>
           <div className="flex items-center justify-between border-t-2 border-foreground pt-2">
-            <dt className="text-base font-semibold text-foreground">Total payable</dt>
-            <dd className="text-base font-semibold tabular-nums text-foreground">
+            <dt className="text-base font-semibold text-foreground">
+              Total payable
+            </dt>
+            <dd className="text-base font-semibold text-foreground tabular-nums">
               {formatMzn(total)} MZN
             </dd>
           </div>
@@ -1798,8 +2044,8 @@ function InvoiceDocument({
               VC-01 · FE-04 · BR-004-05 · TX-01
             </p>
             <p className="mt-1">
-              This is a <span className="font-semibold">proforma invoice</span> for review only.
-              No transaction posted yet.
+              This is a <span className="font-semibold">proforma invoice</span>{" "}
+              for review only. No transaction posted yet.
             </p>
           </div>
         </div>
@@ -1822,28 +2068,14 @@ function InvoiceMeta({
       <dt className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
         {label}
       </dt>
-      <dd className={cn("text-xs text-foreground", mono && "font-mono tracking-wider")}>
+      <dd
+        className={cn(
+          "text-xs text-foreground",
+          mono && "font-mono tracking-wider"
+        )}
+      >
         {value}
       </dd>
-    </div>
-  )
-}
-
-function InvoiceRow({
-  label,
-  value,
-  mono,
-}: {
-  label: string
-  value: string
-  mono?: boolean
-}) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-        {label}
-      </dt>
-      <dd className={cn("text-sm text-foreground", mono && "font-mono tracking-wider")}>{value}</dd>
     </div>
   )
 }
@@ -1866,7 +2098,11 @@ function InvoiceLine({
         emphasised && "bg-card font-semibold"
       )}
     >
-      <span className={cn("text-muted-foreground", emphasised && "text-foreground")}>{label}</span>
+      <span
+        className={cn("text-muted-foreground", emphasised && "text-foreground")}
+      >
+        {label}
+      </span>
       <span
         className={cn(
           "font-medium tabular-nums",
@@ -1926,6 +2162,12 @@ function ReceiptStep({
   if (result.kind === "failure") return null
   const receipt = result.receipt
   const isPending = result.kind === "pending"
+  const validUntil = format(new Date(receipt.rangeToIso), "dd.MM.yyyy")
+  const receiptSerial = receipt.number.replace(/\D/g, "").slice(-7) || "0000000"
+  const receiptYear = format(new Date(receipt.issuedAt), "yyyy")
+  const receiptSeries = receipt.category.toLowerCase().includes("special")
+    ? "S"
+    : "B"
 
   return (
     <>
@@ -1945,11 +2187,17 @@ function ReceiptStep({
               : "bg-primary text-primary-foreground"
           )}
         >
-          {isPending ? <AlertTriangle className="size-5" /> : <BadgeCheck className="size-5" />}
+          {isPending ? (
+            <AlertTriangle className="size-5" />
+          ) : (
+            <BadgeCheck className="size-5" />
+          )}
         </span>
         <div className="flex-1">
           <p className="text-base font-semibold text-foreground">
-            {isPending ? "Payment instructed · awaiting bank" : "Payment confirmed"}
+            {isPending
+              ? "Payment instructed · awaiting bank"
+              : "Payment confirmed"}
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {isPending
@@ -1965,30 +2213,80 @@ function ReceiptStep({
       <Card>
         <SectionHeader
           eyebrow="Digital receipt"
-          description="QR scannable at any roadside checkpoint for compliance verification."
-          trailing={
-            <span className="rounded-full bg-muted px-2.5 py-0.5 font-mono text-[11px] tracking-wider text-foreground">
-              {receipt.number}
-            </span>
-          }
+          description="Vehicle tax sticker view for roadside checkpoint verification."
         />
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto]">
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-            <InvoiceRow label="Vehicle" value={receipt.vehiclePlate} mono />
-            <InvoiceRow label="Model" value={receipt.vehicleModel} />
-            <InvoiceRow label="Category" value={receipt.category} />
-            <InvoiceRow label="Channel" value={receipt.channelLabel} />
-            <InvoiceRow
-              label="Coverage"
-              value={`${format(new Date(receipt.rangeFromIso), "d MMM")} – ${format(new Date(receipt.rangeToIso), "d MMM yyyy")}`}
+        <div className="mx-auto w-full max-w-xl rounded-[28px] border border-primary/20 bg-primary/10 p-4 shadow-sm">
+          <div className="relative overflow-hidden rounded-[22px] border border-primary/30 bg-card p-5">
+            <img
+              src="/maputo-logo.webp"
+              alt=""
+              aria-hidden
+              className="pointer-events-none absolute inset-0 m-auto h-[88%] w-[88%] object-contain opacity-[0.045]"
             />
-            <InvoiceRow
-              label="Issued"
-              value={format(new Date(receipt.issuedAt), "d MMM yyyy · HH:mm")}
-            />
-          </dl>
-          <QrPlaceholder payload={receipt.qrPayload} />
+            <div className="pointer-events-none absolute inset-3 rounded-full border-2 border-primary/45" />
+            <div className="pointer-events-none absolute inset-8 rounded-full border border-secondary/50" />
+
+            <div className="relative flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+                  Município de Maputo
+                </p>
+                <p className="mt-1 text-lg font-semibold tracking-tight text-foreground">
+                  Vehicle tax receipt
+                </p>
+              </div>
+              <img
+                src="/maputo-logo.webp"
+                alt="Município de Maputo"
+                className="size-12 shrink-0 object-contain"
+              />
+            </div>
+
+            <div className="relative mt-5 grid grid-cols-[132px_1fr] items-center gap-4">
+              <div className="rounded-md bg-card/90 p-2 shadow-xs">
+                <QrPlaceholder payload={receipt.qrPayload} compact />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate font-mono text-2xl font-semibold tracking-wider text-foreground">
+                  {receipt.vehiclePlate.replace(/\s+/g, "")}
+                </p>
+                <p className="mt-1 truncate text-xs font-medium text-muted-foreground">
+                  {receipt.vehicleModel}
+                </p>
+                <p className="mt-3 text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+                  Category
+                </p>
+                <p className="mt-1 truncate text-sm font-semibold text-foreground">
+                  {receipt.category}
+                </p>
+              </div>
+            </div>
+
+            <div className="relative mt-5 grid grid-cols-3 overflow-hidden rounded-lg border border-border bg-background/85 text-center">
+              <StickerField label="Serial" value={receiptSerial} mono />
+              <StickerField label="Year" value={receiptYear} mono />
+              <StickerField label="Series" value={receiptSeries} mono />
+            </div>
+
+            <div className="relative mt-4 flex items-center justify-between gap-4 rounded-lg border border-border bg-background/85 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+                  Valid until
+                </p>
+                <p className="mt-0.5 font-mono text-sm font-semibold tracking-wider text-foreground">
+                  {validUntil}
+                </p>
+                <p className="mt-1 truncate text-[10px] text-muted-foreground">
+                  Receipt {receipt.number} · {receipt.channelLabel}
+                </p>
+              </div>
+              <span
+                aria-hidden
+                className="size-12 shrink-0 rounded-full border border-secondary/70 bg-[conic-gradient(from_20deg,hsl(var(--secondary)),hsl(var(--primary)),hsl(var(--accent)),hsl(var(--secondary)))] opacity-80 shadow-sm"
+              />
+            </div>
+          </div>
         </div>
 
         <div className="rounded-lg border border-border bg-muted/30">
@@ -2050,7 +2348,8 @@ function ReceiptStep({
             className="rounded-md"
             onClick={() => {
               toast.info("Generating PDF…", {
-                description: "Use your browser's print dialog to save a PDF copy.",
+                description:
+                  "Use your browser's print dialog to save a PDF copy.",
               })
               window.print()
             }}
@@ -2070,10 +2369,13 @@ function ReceiptStep({
               <FileText className="size-4" />
             </span>
             <div>
-              <p className="text-sm font-semibold text-foreground">Compliance update on hold</p>
+              <p className="text-sm font-semibold text-foreground">
+                Compliance update on hold
+              </p>
               <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-                {receipt.vehiclePlate} stays in its current state until the bank reconciles the wire
-                (typically T+1). We'll flip the status automatically when funds clear.
+                {receipt.vehiclePlate} stays in its current state until the bank
+                reconciles the wire (typically T+1). We'll flip the status
+                automatically when funds clear.
               </p>
             </div>
           </div>
@@ -2081,7 +2383,12 @@ function ReceiptStep({
       )}
 
       <div className="flex items-center justify-between gap-3 pt-2">
-        <Button variant="outline" size="lg" onClick={onPayAnother} className="rounded-lg">
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={onPayAnother}
+          className="rounded-lg"
+        >
           <Plus />
           Pay another charge
         </Button>
@@ -2091,6 +2398,32 @@ function ReceiptStep({
         </Button>
       </div>
     </>
+  )
+}
+
+function StickerField({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+}) {
+  return (
+    <div className="border-r border-border px-2 py-2 last:border-r-0">
+      <p className="text-[9px] font-semibold tracking-widest text-muted-foreground uppercase">
+        {label}
+      </p>
+      <p
+        className={cn(
+          "mt-1 text-sm font-semibold text-foreground",
+          mono && "font-mono tracking-wider"
+        )}
+      >
+        {value}
+      </p>
+    </div>
   )
 }
 
@@ -2133,16 +2466,25 @@ function ComplianceFlip({ vehiclePlate }: { vehiclePlate: string }) {
   )
 }
 
-function QrPlaceholder({ payload }: { payload: string }) {
+function QrPlaceholder({
+  payload,
+  compact = false,
+}: {
+  payload: string
+  compact?: boolean
+}) {
   return (
     <div
       role="img"
       aria-label={`Compliance QR for ${payload}`}
-      className="flex h-32 w-32 shrink-0 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border bg-muted/40 text-muted-foreground"
+      className={cn(
+        "flex shrink-0 flex-col items-center justify-center gap-1 border-2 border-dashed border-border bg-muted/40 text-muted-foreground",
+        compact ? "h-28 w-28 rounded-md" : "h-32 w-32 rounded-lg"
+      )}
     >
-      <QrCode className="size-10" strokeWidth={1.5} />
+      <QrCode className={compact ? "size-20" : "size-10"} strokeWidth={1.5} />
       <span className="px-2 text-center font-mono text-[9px] leading-tight break-all text-muted-foreground/80">
-        {payload}
+        {compact ? "SCAN" : payload}
       </span>
     </div>
   )
@@ -2164,8 +2506,11 @@ function RouteStep({
 }) {
   const designated = useMemo(() => getDesignatedRoutes(), [])
   const portCorridor = useMemo(() => getPortCorridorRoutes(), [])
-  const allRoutes = useMemo(() => [...designated, ...portCorridor], [designated, portCorridor])
-  const selected = form.routeCode ? lookupRoute(form.routeCode) ?? null : null
+  const allRoutes = useMemo(
+    () => [...designated, ...portCorridor],
+    [designated, portCorridor]
+  )
+  const selected = form.routeCode ? (lookupRoute(form.routeCode) ?? null) : null
   const isOffList = isOffListRoute(selected)
 
   const [query, setQuery] = useState("")
@@ -2204,7 +2549,7 @@ function RouteStep({
         />
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative min-w-[200px] flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
@@ -2238,6 +2583,41 @@ function RouteStep({
           </FilterChip>
         </div>
 
+        <button
+          type="button"
+          onClick={() => setRouteCode(OFF_LIST_ROUTE.routeCode)}
+          className={cn(
+            "flex items-center gap-3 rounded-lg border-2 border-dashed px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+            isOffList
+              ? "border-destructive/50 bg-destructive/5"
+              : "border-border bg-muted/20 hover:border-destructive/40 hover:bg-destructive/5"
+          )}
+        >
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-destructive/10 text-destructive">
+            <MapIcon className="size-3.5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-foreground">
+              Off-list route
+            </p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              Exceptional workflow: livrete + title + justification + police
+              escort.
+            </p>
+          </div>
+          <span
+            aria-hidden
+            className={cn(
+              "flex size-4 shrink-0 items-center justify-center rounded-full border",
+              isOffList ? "border-destructive" : "border-muted-foreground/30"
+            )}
+          >
+            {isOffList && (
+              <span className="size-2 rounded-full bg-destructive" />
+            )}
+          </span>
+        </button>
+
         <ul className="max-h-[360px] divide-y divide-border overflow-y-auto rounded-lg border border-border bg-card">
           {filtered.length === 0 ? (
             <li className="px-4 py-8 text-center text-xs text-muted-foreground">
@@ -2262,10 +2642,14 @@ function RouteStep({
                       aria-hidden
                       className={cn(
                         "flex size-4 shrink-0 items-center justify-center rounded-full border",
-                        isSelected ? "border-primary" : "border-muted-foreground/30"
+                        isSelected
+                          ? "border-primary"
+                          : "border-muted-foreground/30"
                       )}
                     >
-                      {isSelected && <span className="size-2 rounded-full bg-primary" />}
+                      {isSelected && (
+                        <span className="size-2 rounded-full bg-primary" />
+                      )}
                     </span>
                     <span
                       className={cn(
@@ -2275,7 +2659,11 @@ function RouteStep({
                           : "bg-secondary/15 text-secondary"
                       )}
                     >
-                      {isPort ? <Anchor className="size-3" /> : <Moon className="size-3" />}
+                      {isPort ? (
+                        <Anchor className="size-3" />
+                      ) : (
+                        <Moon className="size-3" />
+                      )}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                       {r.routeName}
@@ -2294,40 +2682,6 @@ function RouteStep({
             })
           )}
         </ul>
-
-        <button
-          type="button"
-          onClick={() => setRouteCode(OFF_LIST_ROUTE.routeCode)}
-          className={cn(
-            "flex items-center gap-3 rounded-lg border-2 border-dashed px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-            isOffList
-              ? "border-destructive/50 bg-destructive/5"
-              : "border-border bg-muted/20 hover:border-destructive/40 hover:bg-destructive/5"
-          )}
-        >
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-destructive/10 text-destructive">
-            <MapIcon className="size-3.5" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-foreground">
-              Off-list route — pick on map
-            </p>
-            <p className="truncate text-[11px] text-muted-foreground">
-              Routes EXCEPTIONAL workflow: livrete + title + justification + police escort.
-            </p>
-          </div>
-          <span
-            aria-hidden
-            className={cn(
-              "flex size-4 shrink-0 items-center justify-center rounded-full border",
-              isOffList ? "border-destructive" : "border-muted-foreground/30"
-            )}
-          >
-            {isOffList && <span className="size-2 rounded-full bg-destructive" />}
-          </span>
-        </button>
-
-        {isOffList && <MapPlaceholder />}
       </Card>
 
       <Footer
@@ -2370,7 +2724,9 @@ function FilterChip({
       <span
         className={cn(
           "rounded-full px-1.5 text-[10px] tabular-nums",
-          active ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"
+          active
+            ? "bg-primary-foreground/20 text-primary-foreground"
+            : "bg-muted text-muted-foreground"
         )}
       >
         {count}
@@ -2488,9 +2844,9 @@ function WindowStep({
           <div className="flex items-start gap-2 rounded-lg border border-secondary/30 bg-accent/40 px-3 py-2.5 text-[11px] leading-snug text-muted-foreground">
             <Moon className="mt-0.5 size-3.5 shrink-0 text-secondary" />
             <p>
-              Operation is permitted only during the night window each day in the selected range
-              ({NIGHT_WINDOW_LABEL}). Movement outside that window raises an OUT_OF_HOURS_MOVEMENT
-              violation.
+              Operation is permitted only during the night window each day in
+              the selected range ({NIGHT_WINDOW_LABEL}). Movement outside that
+              window raises an OUT_OF_HOURS_MOVEMENT violation.
             </p>
           </div>
         )}
@@ -2498,35 +2854,16 @@ function WindowStep({
 
       <Footer
         backLabel="Back to route"
-        continueLabel={decision.licenceType === "EXCEPTIONAL" ? "Continue to attachments" : "Continue to review"}
+        continueLabel={
+          decision.licenceType === "EXCEPTIONAL"
+            ? "Continue to attachments"
+            : "Continue to review"
+        }
         onBack={onBack}
         onContinue={onContinue}
         disabled={!valid}
       />
     </>
-  )
-}
-
-
-function MapPlaceholder() {
-  return (
-    <div className="rounded-xl border border-dashed border-destructive/40 bg-destructive/5 p-6">
-      <div className="flex items-start gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-destructive/15 text-destructive">
-          <MapIcon className="size-4" />
-        </span>
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-foreground">Pick destination on map</p>
-          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-            Drop a pin on the destination address. The municipal review team will assess the
-            requested corridor against §7.2 and arrange a police escort once approved.
-          </p>
-          <div className="mt-3 flex h-40 w-full items-center justify-center rounded-md border border-dashed border-border bg-card text-[11px] text-muted-foreground">
-            Map drop-pin (placeholder for demo)
-          </div>
-        </div>
-      </div>
-    </div>
   )
 }
 
@@ -2549,7 +2886,7 @@ function AttachmentsStep({
 
   const errors = validateApplication({
     vehicle,
-    route: form.routeCode ? lookupRoute(form.routeCode) ?? null : null,
+    route: form.routeCode ? (lookupRoute(form.routeCode) ?? null) : null,
     licenceType: "EXCEPTIONAL",
     durationDays: form.durationDays,
     attachments: form.attachments,
@@ -2578,7 +2915,9 @@ function AttachmentsStep({
           />
           <FileSlot
             label="Police Escort Request"
-            filename={a.escortRequestRef ? `Reference ${a.escortRequestRef}` : undefined}
+            filename={
+              a.escortRequestRef ? `Reference ${a.escortRequestRef}` : undefined
+            }
             onPick={() =>
               setAttachment({
                 escortRequestRef: `MP-ESC-${Math.floor(10_000 + Math.random() * 80_000)}`,
@@ -2586,7 +2925,9 @@ function AttachmentsStep({
             }
           />
           <Field className="md:col-span-1">
-            <FieldLabel htmlFor="justification">Justification (≥ 20 chars)</FieldLabel>
+            <FieldLabel htmlFor="justification">
+              Justification (≥ 20 chars)
+            </FieldLabel>
             <Textarea
               id="justification"
               rows={3}
@@ -2595,14 +2936,17 @@ function AttachmentsStep({
               placeholder="Cite the extreme necessity that warrants off-route operation…"
             />
             <FieldDescription>
-              Per AU-01 the justification must explicitly cite "extreme necessity".
+              Per AU-01 the justification must explicitly cite "extreme
+              necessity".
             </FieldDescription>
           </Field>
         </div>
 
         {blocking.length > 0 && (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-            <p className="text-[11px] font-semibold text-destructive">Outstanding (VL-03):</p>
+            <p className="text-[11px] font-semibold text-destructive">
+              Outstanding (VL-03):
+            </p>
             <ul className="mt-1 list-disc pl-5 text-[11px] leading-snug text-muted-foreground">
               {blocking.map((e, i) => (
                 <li key={i}>{e.message}</li>
@@ -2646,7 +2990,9 @@ function FileSlot({
       <span
         className={cn(
           "flex size-9 shrink-0 items-center justify-center rounded-md",
-          filename ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
+          filename
+            ? "bg-primary/15 text-primary"
+            : "bg-muted text-muted-foreground"
         )}
       >
         <Paperclip className="size-4" />
@@ -2692,63 +3038,197 @@ function ReviewSubmitStep({
     hasOpenPostpaidBalance: hasOpenPostpaidBalance(vehicle),
   })
   const blocked = errors.length > 0
+  const coverage =
+    form.range.from && form.range.to
+      ? `${format(form.range.from, "d MMM")} - ${format(form.range.to, "d MMM yyyy")}`
+      : "-"
+  const feeLabel = decision.feeExempt
+    ? "Fee-exempt - audit only"
+    : `${formatMzn(fee.totalMzn)} MZN`
+  const attachmentSummary =
+    decision.licenceType === "EXCEPTIONAL"
+      ? [
+          ["Livrete", form.attachments.livreteFilename ?? "-"],
+          ["Title of ownership", form.attachments.titleFilename ?? "-"],
+          ["Justification", form.attachments.justification ? "Provided" : "-"],
+          ["Police escort ref", form.attachments.escortRequestRef ?? "-"],
+        ]
+      : [["Attachments", "Not required for this licence type"]]
 
   return (
     <>
-      <Card>
-        <SectionHeader
-          eyebrow="Review submission"
-          description="Lodge with the Municipal Directorate. Fee is payable once the licence becomes ACTIVE."
+      <section className="relative overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <img
+          src="/maputo-logo.webp"
+          alt=""
+          aria-hidden
+          className="pointer-events-none absolute top-44 left-1/2 h-[460px] w-[560px] max-w-none -translate-x-1/2 opacity-[0.055]"
         />
-        <dl className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
-          <InvoiceRow label="Licence type" value={licenceTypeLabel(decision.licenceType)} />
-          <InvoiceRow label="Route" value={route.routeName} />
-          <InvoiceRow label="Operating window" value={decision.lockedTimeWindow?.label ?? "Per range"} />
-          <InvoiceRow
-            label="Coverage"
-            value={
-              form.range.from && form.range.to
-                ? `${format(form.range.from, "d MMM")} – ${format(form.range.to, "d MMM yyyy")}`
-                : "—"
-            }
-          />
-          <InvoiceRow label="Police escort" value={decision.requiresEscort ? "Required" : "Not required"} />
-          <InvoiceRow label="Estimated review" value={form.application?.estimatedDecisionWindowLabel ?? estimatedReviewWindowLabel(decision.licenceType)} />
-        </dl>
 
-        <div className="rounded-lg border border-border bg-muted/30">
-          {decision.feeExempt ? (
-            <InvoiceLine label="Fee due on activation" value="Fee-exempt — audit only" emphasised />
-          ) : (
-            <InvoiceLine
-              label={`Fee due on activation · ${fee.tierLabel} · ${form.durationDays} day${form.durationDays === 1 ? "" : "s"}`}
-              value={`${formatMzn(fee.totalMzn)} MZN`}
-              emphasised
-            />
-          )}
-        </div>
-
-        {blocked && (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-            <p className="text-[11px] font-semibold text-destructive">Cannot submit yet:</p>
-            <ul className="mt-1 list-disc pl-5 text-[11px] leading-snug text-muted-foreground">
-              {errors.map((e, i) => (
-                <li key={i}>
-                  <span className="font-mono text-[10px] tracking-wider">{e.code}</span> · {e.message}
-                </li>
-              ))}
-            </ul>
+        <div className="relative border-b border-border px-7 pt-6 pb-5">
+          <div className="flex items-start justify-between gap-5">
+            <div className="flex min-w-0 items-start gap-4">
+              <img
+                src="/maputo-logo.webp"
+                alt="Município de Maputo"
+                className="size-20 shrink-0 object-contain"
+              />
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+                  Município de Maputo
+                </p>
+                <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">
+                  Pedido de Autorização de Circulação
+                </h2>
+                <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                  Documento de submissão para verificação pela Direcção
+                  Municipal. A taxa é pagável quando a licença ficar ACTIVE.
+                </p>
+              </div>
+            </div>
+            <div className="shrink-0 rounded-lg border border-border bg-muted/30 px-3 py-2 text-right">
+              <p className="text-[9px] font-semibold tracking-widest text-muted-foreground uppercase">
+                Estado
+              </p>
+              <p className="mt-1 text-sm font-semibold text-foreground">
+                Draft review
+              </p>
+            </div>
           </div>
-        )}
-
-        <div className="rounded-lg border border-border bg-card p-3 text-[11px] leading-snug text-muted-foreground">
-          <p className="font-semibold text-foreground">{decision.decisionLine}</p>
-          <p className="mt-1">{decision.rationale}</p>
         </div>
-      </Card>
+
+        <div className="relative px-7 py-6">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-[1fr_220px]">
+            <div>
+              <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+                Requerente / veículo
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                <DocumentField label="Plate" value={vehicle.plate} mono />
+                <DocumentField label="Vehicle" value={vehicle.model} />
+                <DocumentField
+                  label="Logbook"
+                  value={vehicle.logbookRef}
+                  mono
+                />
+                <DocumentField
+                  label="Gross weight"
+                  value={`${formatMzn(vehicle.weightKg)} kg`}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border bg-background/80 p-3">
+              <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+                Fee on activation
+              </p>
+              <p className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+                {feeLabel}
+              </p>
+              {!decision.feeExempt && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {fee.tierLabel} · {form.durationDays} day
+                  {form.durationDays === 1 ? "" : "s"}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-6 border-t border-border pt-5">
+            <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+              Licence particulars
+            </p>
+            <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+              <DocumentField
+                label="Licence type"
+                value={licenceTypeLabel(decision.licenceType)}
+              />
+              <DocumentField label="Route" value={route.routeName} />
+              <DocumentField
+                label="Operating window"
+                value={decision.lockedTimeWindow?.label ?? "Per range"}
+              />
+              <DocumentField label="Coverage" value={coverage} />
+              <DocumentField
+                label="Police escort"
+                value={decision.requiresEscort ? "Required" : "Not required"}
+              />
+              <DocumentField
+                label="Estimated review"
+                value={
+                  form.application?.estimatedDecisionWindowLabel ??
+                  estimatedReviewWindowLabel(decision.licenceType)
+                }
+              />
+            </div>
+          </div>
+
+          <div className="mt-6 border-t border-border pt-5">
+            <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+              Supporting record
+            </p>
+            <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+              {attachmentSummary.map(([label, value]) => (
+                <DocumentField key={label} label={label} value={value} />
+              ))}
+            </div>
+          </div>
+
+          {blocked && (
+            <div className="mt-6 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+              <p className="text-[11px] font-semibold text-destructive">
+                Cannot submit yet:
+              </p>
+              <ul className="mt-1 list-disc pl-5 text-[11px] leading-snug text-muted-foreground">
+                {errors.map((e, i) => (
+                  <li key={i}>
+                    <span className="font-mono text-[10px] tracking-wider">
+                      {e.code}
+                    </span>{" "}
+                    · {e.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="mt-6 rounded-lg border border-border bg-background/80 p-3 text-[11px] leading-snug text-muted-foreground">
+            <p className="font-semibold text-foreground">
+              {decision.decisionLine}
+            </p>
+            <p className="mt-1">{decision.rationale}</p>
+          </div>
+
+          <div className="mt-8 grid grid-cols-1 gap-4 border-t border-border pt-5 text-xs text-muted-foreground sm:grid-cols-3">
+            <div>
+              <p className="font-semibold text-foreground">Prepared by</p>
+              <p className="mt-5 border-t border-border pt-2">
+                Transporter portal
+              </p>
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">Submitted to</p>
+              <p className="mt-5 border-t border-border pt-2">
+                Direcção Municipal
+              </p>
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">Review stamp</p>
+              <p className="mt-5 border-t border-border pt-2">
+                Pending verification
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div className="flex items-center justify-between gap-3 pt-2">
-        <Button variant="outline" size="lg" onClick={onBack} className="rounded-lg">
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={onBack}
+          className="rounded-lg"
+        >
           <ArrowLeft />
           Back
         </Button>
@@ -2766,21 +3246,55 @@ function ReviewSubmitStep({
   )
 }
 
+function DocumentField({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+}) {
+  return (
+    <div className="min-w-0 border-b border-border pb-2">
+      <dt className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+        {label}
+      </dt>
+      <dd
+        className={cn(
+          "mt-1 truncate text-sm font-medium text-foreground",
+          mono && "font-mono tracking-wider"
+        )}
+      >
+        {value || "-"}
+      </dd>
+    </div>
+  )
+}
+
 function licenceTypeLabel(licenceType: LicenceType): string {
   switch (licenceType) {
-    case "STANDARD": return "Standard circulation"
-    case "NIGHT_RESTRICTED": return "Night-restricted (designated routes)"
-    case "PORT_EXEMPT": return "Port corridor (fee-exempt)"
-    case "EXCEPTIONAL": return "Exceptional (escorted)"
+    case "STANDARD":
+      return "Standard circulation"
+    case "NIGHT_RESTRICTED":
+      return "Night-restricted (designated routes)"
+    case "PORT_EXEMPT":
+      return "Port corridor (fee-exempt)"
+    case "EXCEPTIONAL":
+      return "Exceptional (escorted)"
   }
 }
 
 function estimatedReviewWindowLabel(licenceType: LicenceType): string {
   switch (licenceType) {
-    case "PORT_EXEMPT": return "≈ 1 working day"
-    case "NIGHT_RESTRICTED": return "≈ 3 working days"
-    case "EXCEPTIONAL": return "5–10 working days"
-    case "STANDARD": return "Immediate (pay-now)"
+    case "PORT_EXEMPT":
+      return "≈ 1 working day"
+    case "NIGHT_RESTRICTED":
+      return "≈ 3 working days"
+    case "EXCEPTIONAL":
+      return "5–10 working days"
+    case "STANDARD":
+      return "Immediate (pay-now)"
   }
 }
 
@@ -2798,7 +3312,8 @@ function SubmittingStep() {
             Lodging with the Municipal Directorate…
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            We're stamping the application and routing it for review. Don't refresh.
+            We're stamping the application and routing it for review. Don't
+            refresh.
           </p>
         </div>
       </div>
@@ -2830,8 +3345,9 @@ function SubmittedStep({
             Application submitted · {application.reference}
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {licenceTypeLabel(application.licenceType)} for {application.vehicle.plate} on{" "}
-            {application.route.routeName}. Estimated review: {application.estimatedDecisionWindowLabel}.
+            {licenceTypeLabel(application.licenceType)} for{" "}
+            {application.vehicle.plate} on {application.route.routeName}.
+            Estimated review: {application.estimatedDecisionWindowLabel}.
           </p>
         </div>
         <StatusPill tone="renewal-soon">Submitted</StatusPill>
@@ -2858,13 +3374,21 @@ function SubmittedStep({
                   <span
                     className={cn(
                       "flex size-7 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold",
-                      done && "border-primary bg-primary text-primary-foreground",
-                      active && "border-primary bg-card text-primary ring-4 ring-primary/10 animate-pulse",
-                      !done && !active && "border-muted-foreground/20 bg-muted/40 text-muted-foreground/50"
+                      done &&
+                        "border-primary bg-primary text-primary-foreground",
+                      active &&
+                        "animate-pulse border-primary bg-card text-primary ring-4 ring-primary/10",
+                      !done &&
+                        !active &&
+                        "border-muted-foreground/20 bg-muted/40 text-muted-foreground/50"
                     )}
                     aria-hidden
                   >
-                    {done ? <CheckCircle2 className="size-3.5" strokeWidth={3} /> : <Clock className="size-3.5" />}
+                    {done ? (
+                      <CheckCircle2 className="size-3.5" strokeWidth={3} />
+                    ) : (
+                      <Clock className="size-3.5" />
+                    )}
                   </span>
                   {!isLast && (
                     <div
@@ -2889,7 +3413,8 @@ function SubmittedStep({
                   </p>
                   {active && (
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      In progress · ETA {application.estimatedDecisionWindowLabel}
+                      In progress · ETA{" "}
+                      {application.estimatedDecisionWindowLabel}
                     </p>
                   )}
                 </div>
@@ -2911,7 +3436,12 @@ function SubmittedStep({
       </Card>
 
       <div className="flex items-center justify-between gap-3 pt-2">
-        <Button variant="outline" size="lg" onClick={onSubmitAnother} className="rounded-lg">
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={onSubmitAnother}
+          className="rounded-lg"
+        >
           <Plus />
           Submit another
         </Button>
@@ -2943,7 +3473,11 @@ function SubmissionPreview({
   const vehicle = form.vehicle
   const fee =
     vehicle && decision
-      ? resolveFee({ vehicle, licenceType: decision.licenceType, durationDays: form.durationDays })
+      ? resolveFee({
+          vehicle,
+          licenceType: decision.licenceType,
+          durationDays: form.durationDays,
+        })
       : null
   const totalLabel =
     !decision || !vehicle
@@ -2990,10 +3524,7 @@ function SubmissionPreview({
           label="Window"
           value={decision?.lockedTimeWindow?.label ?? "Per range"}
         />
-        <SummaryLine
-          label="Days"
-          value={`${form.durationDays}`}
-        />
+        <SummaryLine label="Days" value={`${form.durationDays}`} />
       </div>
 
       <div className="mt-3 space-y-2 border-b border-sidebar-border/40 pb-3 text-xs">
@@ -3025,10 +3556,9 @@ function SubmissionPreview({
         <ArrowRight />
       </Button>
       <p className="mt-3 text-center text-[11px] text-sidebar-foreground/60">
-        Restricted-heavy licences are payable only after the Municipal Directorate approves the
-        application (TX-01).
+        Restricted-heavy licences are payable only after the Municipal
+        Directorate approves the application (TX-01).
       </p>
     </section>
   )
 }
-

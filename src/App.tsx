@@ -17,7 +17,7 @@ export function App() {
         <Route index element={<Overview />} />
         <Route path="fleet" element={<MyFleet />} />
         <Route path="fleet/new" element={<VehicleNew />} />
-        <Route path="fleet/:plate" element={<VehicleDetail />} />
+        <Route path="fleet/:vehicleId" element={<VehicleDetail />} />
         <Route path="pay-charges" element={<PayCharges />} />
         <Route path="permits" element={<Permits />} />
         <Route path="transactions" element={<Transactions />} />

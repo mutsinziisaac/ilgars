@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft,
@@ -18,45 +19,49 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-  InputGroupText,
 } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { VehicleIllustration } from "@/components/fleet/vehicle-illustration"
+import { VerticalStepper, type Step } from "@/components/fleet/vertical-stepper"
+import { useAuth } from "@/components/auth/auth-context"
 import {
-  VerticalStepper,
-  type Step,
-} from "@/components/fleet/vertical-stepper"
-import {
-  WEIGHT_TIERS,
   formatMzn,
-  mvrLookup,
   normalisePlate,
   plateExists,
-  tierMidpoint,
   weightTierForKg,
-  type WeightTier,
 } from "@/lib/fleet"
+import { ApiError } from "@/lib/api"
+import {
+  createFleetVehicle,
+  type FleetVehicleRegistrationPayload,
+} from "@/lib/fleet-vehicles-api"
+import {
+  compactPlateNumber,
+  getVehicleByPlate,
+  type MotorVehicleLogbook,
+} from "@/lib/motor-vehicle-api"
 import { cn } from "@/lib/utils"
 
-type StepKey = "logbook" | "details" | "photos" | "review"
+type StepKey = "logbook" | "photos" | "review"
 
 const STEPS: readonly Step<StepKey>[] = [
   { key: "logbook", label: "Logbook (MVR)", description: "Pull from registry" },
-  { key: "details", label: "Vehicle details", description: "Class · weight · usage" },
   { key: "photos", label: "Photos", description: "6 angles, JPEG/PNG ≤ 5 MB" },
-  { key: "review", label: "Review & submit", description: "Confirm & register" },
+  {
+    key: "review",
+    label: "Review & submit",
+    description: "Confirm & register",
+  },
 ]
 
 const STEP_INDEX: Record<StepKey, number> = {
   logbook: 0,
-  details: 1,
-  photos: 2,
-  review: 3,
+  photos: 1,
+  review: 2,
 }
 
 const PHOTO_SLOTS = [
@@ -82,6 +87,7 @@ type FormState = {
   weightKg: number
   usageType: UsageType
   mvrLocked: boolean
+  logbookRecord: MotorVehicleLogbook | null
   photos: Partial<Record<PhotoKey, File>>
   photoErrors: Partial<Record<PhotoKey, string>>
 }
@@ -97,17 +103,67 @@ const INITIAL_STATE: FormState = {
   weightKg: 0,
   usageType: "cargo",
   mvrLocked: false,
+  logbookRecord: null,
   photos: {},
   photoErrors: {},
 }
 
 const PHOTO_MAX_BYTES = 5 * 1024 * 1024
 
+function tonnesFromKg(value: number | null): number | null {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Number((value / 1000).toFixed(4))
+    : null
+}
+
+function capacityTonnes(record: MotorVehicleLogbook, fallbackKg: number) {
+  if (
+    typeof record.currentLogbookCapacity === "number" &&
+    Number.isFinite(record.currentLogbookCapacity)
+  ) {
+    const value = record.currentLogbookCapacity
+    return value > 1000 ? Number((value / 1000).toFixed(4)) : value
+  }
+
+  return (
+    tonnesFromKg(record.logbookCapacityKg) ??
+    tonnesFromKg(record.grossWeightTotalKg) ??
+    tonnesFromKg(fallbackKg) ??
+    0
+  )
+}
+
+function buildFleetVehiclePayload(
+  form: FormState,
+  ownerName: string
+): FleetVehicleRegistrationPayload | null {
+  const record = form.logbookRecord
+  if (!record?.id) return null
+
+  const plateNumber = compactPlateNumber(record.plateNumber || form.plate)
+  return {
+    vehicleId: record.id,
+    plateNumber,
+    truckNumber: record.truckNumber || `TRK-${plateNumber}`,
+    ownerName,
+    operatorName: record.operatorName || "Demo Operator",
+    capacitySnapshot: capacityTonnes(record, form.weightKg),
+    capacityUnit: "TONNES",
+    registryStatus: record.status?.trim().toUpperCase() || "ACTIVE",
+    exemptionStatus: record.exemptionStatus?.trim().toUpperCase() || "NONE",
+    compliantForRating: true,
+    source: "OWNER_SELECTED",
+  }
+}
+
 export default function VehicleNew() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const queryClient = useQueryClient()
   const [params, setParams] = useSearchParams()
   const stepParam = (params.get("step") ?? "logbook") as StepKey
-  const step: StepKey = STEP_INDEX[stepParam] !== undefined ? stepParam : "logbook"
+  const step: StepKey =
+    STEP_INDEX[stepParam] !== undefined ? stepParam : "logbook"
   const returnTo = params.get("returnTo")
   const [form, setForm] = useState<FormState>(() => {
     const platePrefill = params.get("plate")
@@ -135,11 +191,37 @@ export default function VehicleNew() {
     else goTo(STEPS[i - 1].key)
   }
 
+  const registerMutation = useMutation({
+    mutationFn: createFleetVehicle,
+    onSuccess: async (vehicle) => {
+      await queryClient.invalidateQueries({ queryKey: ["fleet-vehicles"] })
+      toast.success(
+        `Vehicle ${vehicle.plateNumberSnapshot || form.plate} registered`,
+        {
+          description: `${vehicle.truckNumberSnapshot || "Fleet vehicle"} is now active in your fleet.`,
+        }
+      )
+      navigate(returnTo ?? "/fleet")
+    },
+    onError: (error) => {
+      toast.error("Vehicle registration failed", {
+        description:
+          error instanceof Error ? error.message : "Try submitting again.",
+      })
+    },
+  })
+
   const handleSubmit = () => {
-    toast.success(`Vehicle ${form.plate} registered · ref TRK-100184-09`, {
-      description: "Logbook synced via MVR. Ready to assign drivers.",
-    })
-    navigate(returnTo ?? "/fleet")
+    const payload = buildFleetVehiclePayload(form, user.displayName)
+    if (!payload) {
+      toast.error("MVR logbook required", {
+        description:
+          "Look up and select a Motor Vehicle Registry record before submitting.",
+      })
+      return
+    }
+
+    registerMutation.mutate(payload)
   }
 
   return (
@@ -154,13 +236,9 @@ export default function VehicleNew() {
 
       <div className="flex flex-col gap-5">
         {step === "logbook" && (
-          <LogbookStep form={form} setForm={setForm} onContinue={() => goTo("details")} />
-        )}
-        {step === "details" && (
-          <DetailsStep
+          <LogbookStep
             form={form}
             setForm={setForm}
-            onBack={back}
             onContinue={() => goTo("photos")}
           />
         )}
@@ -173,7 +251,12 @@ export default function VehicleNew() {
           />
         )}
         {step === "review" && (
-          <ReviewStep form={form} onBack={back} onSubmit={handleSubmit} />
+          <ReviewStep
+            form={form}
+            onBack={back}
+            onSubmit={handleSubmit}
+            isSubmitting={registerMutation.isPending}
+          />
         )}
       </div>
 
@@ -243,11 +326,21 @@ function Footer({
 }) {
   return (
     <div className="flex items-center justify-between gap-3 pt-2">
-      <Button variant="outline" size="lg" onClick={onBack} className="rounded-lg">
+      <Button
+        variant="outline"
+        size="lg"
+        onClick={onBack}
+        className="rounded-lg"
+      >
         <ArrowLeft />
         {backLabel}
       </Button>
-      <Button size="lg" onClick={onContinue} disabled={disabled} className="rounded-lg">
+      <Button
+        size="lg"
+        onClick={onContinue}
+        disabled={disabled}
+        className="rounded-lg"
+      >
         {continueLabel}
         <ArrowRight />
       </Button>
@@ -266,9 +359,58 @@ function LogbookStep({
   onContinue: () => void
 }) {
   const [plateInput, setPlateInput] = useState(form.plate)
-  const [loading, setLoading] = useState(false)
   const [notFound, setNotFound] = useState(false)
   const [duplicate, setDuplicate] = useState(false)
+  const [lookupError, setLookupError] = useState<string | null>(null)
+  const lookupMutation = useMutation({
+    mutationFn: getVehicleByPlate,
+    onSuccess: (record) => {
+      const plate = record.plateNumber || compactPlateNumber(plateInput)
+      const registrationYear = record.registrationDate
+        ? new Date(record.registrationDate).getFullYear()
+        : ""
+
+      setNotFound(false)
+      setLookupError(null)
+      setForm({
+        ...INITIAL_STATE,
+        plate,
+        logbookRef: formatLogbookReference(record),
+        makeModel: [record.make, record.model].filter(Boolean).join(" "),
+        year:
+          typeof registrationYear === "number" &&
+          Number.isFinite(registrationYear)
+            ? String(registrationYear)
+            : "",
+        chassisVin: record.vinOrChassis ?? "",
+        engineNumber: record.engineNumber ?? "",
+        axles: 4,
+        weightKg: Math.round(
+          record.grossWeightTotalKg ?? record.logbookCapacityKg ?? 0
+        ),
+        usageType: "cargo",
+        mvrLocked: true,
+        logbookRecord: record,
+        photos: {},
+        photoErrors: {},
+      })
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 404) {
+        setNotFound(true)
+        setLookupError(null)
+        return
+      }
+
+      setNotFound(false)
+      setLookupError(
+        error instanceof Error
+          ? error.message
+          : "Vehicle lookup failed. Try again."
+      )
+    },
+  })
+  const loading = lookupMutation.isPending
 
   const lookup = async () => {
     const norm = normalisePlate(plateInput)
@@ -276,37 +418,21 @@ function LogbookStep({
     if (plateExists(norm)) {
       setDuplicate(true)
       setNotFound(false)
+      setLookupError(null)
       return
     }
     setDuplicate(false)
-    setLoading(true)
     setNotFound(false)
-    const result = await mvrLookup(norm)
-    setLoading(false)
-    if (result.kind === "not-found") {
-      setNotFound(true)
-      return
-    }
-    setForm({
-      ...INITIAL_STATE,
-      plate: result.data.plate,
-      logbookRef: result.data.logbookRef,
-      makeModel: result.data.makeModel,
-      year: String(result.data.year),
-      chassisVin: result.data.chassisVin,
-      engineNumber: result.data.engineNumber,
-      axles: result.data.axles,
-      weightKg: result.data.weightKg,
-      usageType: "cargo",
-      mvrLocked: true,
-      photos: {},
-      photoErrors: {},
-    })
-    onContinue()
+    setLookupError(null)
+    lookupMutation.mutate(norm)
   }
 
   const startManual = () => {
-    setForm({ ...INITIAL_STATE, plate: normalisePlate(plateInput), mvrLocked: false })
+    setForm({
+      ...INITIAL_STATE,
+      plate: compactPlateNumber(plateInput),
+      mvrLocked: false,
+    })
     onContinue()
   }
 
@@ -327,8 +453,9 @@ function LogbookStep({
                 setPlateInput(e.target.value.toUpperCase())
                 setNotFound(false)
                 setDuplicate(false)
+                setLookupError(null)
               }}
-              placeholder="e.g. AKM 902 MC"
+              placeholder="e.g. AHS270MP"
               className="font-mono text-sm tracking-wider"
               spellCheck={false}
               autoComplete="off"
@@ -346,26 +473,43 @@ function LogbookStep({
             </InputGroupAddon>
           </InputGroup>
           <FieldDescription>
-            Enter the registered plate. We'll fetch the canonical record from MVR; if it isn't there
-            yet you can register manually.
+            Enter the registered plate. We'll fetch the canonical record from
+            MVR; if it isn't there yet you can register manually.
           </FieldDescription>
           {duplicate && (
             <FieldError>
-              A vehicle with plate {normalisePlate(plateInput)} is already in your fleet.
+              A vehicle with plate {normalisePlate(plateInput)} is already in
+              your fleet.
             </FieldError>
           )}
+          {lookupError && <FieldError>{lookupError}</FieldError>}
         </Field>
+
+        {form.logbookRecord && (
+          <LogbookRecordPanel
+            record={form.logbookRecord}
+            onContinue={onContinue}
+          />
+        )}
 
         {notFound && (
           <div className="flex items-start justify-between gap-3 rounded-lg border border-secondary/40 bg-accent/60 p-4">
             <div>
-              <p className="text-sm font-semibold text-foreground">No MVR record found</p>
+              <p className="text-sm font-semibold text-foreground">
+                No MVR record found
+              </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                We couldn't match {normalisePlate(plateInput)} in MVR. You can still register the
-                vehicle manually — fields will be unlocked on the next step.
+                We couldn't match {normalisePlate(plateInput)} in MVR. You can
+                still register the vehicle manually — fields will be unlocked on
+                the next step.
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={startManual} className="rounded-md">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={startManual}
+              className="rounded-md"
+            >
               Continue manually
             </Button>
           </div>
@@ -375,354 +519,152 @@ function LogbookStep({
   )
 }
 
-// ── Step: Vehicle details ───────────────────────────────────────────────────
-function DetailsStep({
-  form,
-  setForm,
-  onBack,
+function formatLogbookReference(record: MotorVehicleLogbook): string {
+  return [record.logbookSeries, record.logbookNumber].filter(Boolean).join(" ")
+}
+
+function formatKg(value: number | null): string {
+  return typeof value === "number" ? `${formatMzn(value)} kg` : "—"
+}
+
+function formatValue(value: string | number | null): string {
+  if (typeof value === "number") return formatMzn(value)
+  return value && value.trim() !== "" ? value : "—"
+}
+
+function LogbookRecordPanel({
+  record,
   onContinue,
 }: {
-  form: FormState
-  setForm: React.Dispatch<React.SetStateAction<FormState>>
-  onBack: () => void
+  record: MotorVehicleLogbook
   onContinue: () => void
 }) {
-  const [weightInput, setWeightInput] = useState(
-    form.weightKg ? String(form.weightKg) : ""
-  )
-  const [touched, setTouched] = useState(false)
-  const tier = useMemo(() => weightTierForKg(form.weightKg), [form.weightKg])
-
-  const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm((f) => ({ ...f, [key]: value }))
-  }
-
-  const setWeightKg = (kg: number) => {
-    setWeightInput(kg ? String(kg) : "")
-    update("weightKg", kg)
-  }
-
-  const validationError = !form.weightKg
-    ? "Enter the vehicle's gross weight (kg)."
-    : form.weightKg < 1_000
-      ? "Weight must be at least 1,000 kg."
-      : form.weightKg > 80_000
-        ? "Weight must be at most 80,000 kg."
-        : null
-
-  const canContinue = !validationError && form.axles >= 2 && form.makeModel.trim().length > 0
-
-  const handleContinue = () => {
-    setTouched(true)
-    if (canContinue) onContinue()
-  }
+  const logbookRef = formatLogbookReference(record)
 
   return (
-    <>
-      {form.mvrLocked && (
-        <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <CheckCircle2 className="size-4" />
+    <div className="overflow-hidden rounded-xl border border-primary/25 bg-primary/5">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-primary/15 bg-card px-4 py-3">
+        <div>
+          <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+            MVR logbook found
+          </p>
+          <h2 className="mt-1 font-mono text-lg font-semibold tracking-wider text-foreground">
+            {record.plateNumber}
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {record.make} {record.model} · Logbook {logbookRef || "—"}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+            <CheckCircle2 className="size-3.5" />
+            {record.status ?? "Verified"}
           </span>
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-foreground">Logbook verified via MVR API</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Logbook {form.logbookRef} matched to plate {form.plate}. Fields below were prefilled —
-              verify and adjust where needed.
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" className="rounded-md text-primary hover:bg-primary/10">
-            Re-fetch
+          <Button size="sm" onClick={onContinue} className="rounded-md">
+            Use logbook
+            <ArrowRight />
           </Button>
         </div>
-      )}
-
-      <Card>
-        <SectionHeader eyebrow="Vehicle identity" />
-        <FieldGroup className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <LockedField
-            id="plate"
-            label="Number plate"
-            mvr={form.mvrLocked}
-            value={form.plate}
-            onChange={(v) => update("plate", v.toUpperCase())}
-            mono
-          />
-          <LockedField
-            id="logbook"
-            label="Logbook reference"
-            mvr={form.mvrLocked}
-            value={form.logbookRef}
-            onChange={(v) => update("logbookRef", v)}
-            mono
-          />
-          <LockedField
-            id="model"
-            label="Make & model"
-            mvr={form.mvrLocked}
-            value={form.makeModel}
-            onChange={(v) => update("makeModel", v)}
-          />
-          <LockedField
-            id="year"
-            label="Year of manufacture"
-            mvr={form.mvrLocked}
-            value={form.year}
-            onChange={(v) => update("year", v.replace(/[^0-9]/g, "").slice(0, 4))}
-          />
-          <LockedField
-            id="vin"
-            label="Chassis number (VIN)"
-            mvr={form.mvrLocked}
-            value={form.chassisVin}
-            onChange={(v) => update("chassisVin", v.toUpperCase())}
-            mono
-          />
-          <LockedField
-            id="engine"
-            label="Engine number"
-            mvr={form.mvrLocked}
-            value={form.engineNumber}
-            onChange={(v) => update("engineNumber", v.toUpperCase())}
-            mono
-          />
-        </FieldGroup>
-      </Card>
-
-      <Card>
-        <SectionHeader
-          eyebrow="RUC classification"
-          description="Determines applicable tariff per UC-004 (Circulation Licence Fees)"
-          trailing={
-            <span className="rounded-full bg-sidebar/10 px-2.5 py-0.5 text-[11px] font-medium text-sidebar">
-              Affects pricing
-            </span>
-          }
-        />
-
-        <Field>
-          <FieldLabel>Number of axles</FieldLabel>
-          <div className="grid grid-cols-5 gap-2">
-            {[2, 3, 4, 5, 6].map((n) => {
-              const selected = form.axles === n
-              return (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => update("axles", n)}
-                  className={cn(
-                    "rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-                    selected
-                      ? "border-sidebar bg-sidebar text-sidebar-foreground"
-                      : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-primary/5"
-                  )}
-                >
-                  {n} axles
-                </button>
-              )
-            })}
-          </div>
-        </Field>
-
-        <Field data-invalid={touched && !!validationError ? "true" : undefined}>
-          <FieldLabel htmlFor="weight-input">Gross weight (kg) — drives tariff bracket</FieldLabel>
-          <InputGroup>
-            <InputGroupInput
-              id="weight-input"
-              inputMode="numeric"
-              value={weightInput}
-              onChange={(e) => {
-                const raw = e.target.value.replace(/[^0-9]/g, "")
-                setWeightInput(raw)
-                update("weightKg", raw === "" ? 0 : Number(raw))
-              }}
-              onBlur={() => setTouched(true)}
-              placeholder="e.g. 32500"
-              className="font-mono text-sm tabular-nums"
-            />
-            <InputGroupAddon align="inline-end">
-              <InputGroupText>kg</InputGroupText>
-            </InputGroupAddon>
-          </InputGroup>
-          <div className="grid grid-cols-5 gap-2 pt-1">
-            {WEIGHT_TIERS.map((t) => {
-              const active = tier?.key === t.key
-              return (
-                <WeightChip
-                  key={t.key}
-                  tier={t}
-                  active={active}
-                  onClick={() => setWeightKg(tierMidpoint(t))}
-                />
-              )
-            })}
-          </div>
-          {touched && validationError ? (
-            <FieldError>{validationError}</FieldError>
-          ) : (
-            form.weightKg > 0 &&
-            form.weightKg < 8_000 && (
-              <FieldDescription>
-                Note: below the 8,000 kg RUC threshold — vehicle may be exempt.
-              </FieldDescription>
-            )
-          )}
-        </Field>
-
-        <Field>
-          <FieldLabel>Usage type</FieldLabel>
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-            <UsageCard
-              id="cargo"
-              title="Cargo truck"
-              subtitle="Standard freight"
-              selected={form.usageType === "cargo"}
-              onSelect={() => update("usageType", "cargo")}
-            />
-            <UsageCard
-              id="agricultural"
-              title="Agricultural transit"
-              subtitle="1,000 MZN/day flat"
-              selected={form.usageType === "agricultural"}
-              onSelect={() => update("usageType", "agricultural")}
-            />
-            <UsageCard
-              id="special"
-              title="Special permit"
-              subtitle="Case-by-case"
-              selected={form.usageType === "special"}
-              onSelect={() => update("usageType", "special")}
-            />
-          </div>
-        </Field>
-      </Card>
-
-      <Footer
-        backLabel="Back to logbook"
-        continueLabel="Continue to photos"
-        onBack={onBack}
-        onContinue={handleContinue}
-        disabled={touched && !canContinue}
-      />
-    </>
-  )
-}
-
-function LockedField({
-  id,
-  label,
-  mvr,
-  value,
-  onChange,
-  mono = false,
-}: {
-  id: string
-  label: string
-  mvr: boolean
-  value: string
-  onChange: (v: string) => void
-  mono?: boolean
-}) {
-  return (
-    <Field>
-      <div className="flex items-center justify-between">
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
-        {mvr && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wide text-primary uppercase">
-            MVR <CheckCircle2 className="size-3" strokeWidth={3} />
-          </span>
-        )}
       </div>
-      <Input
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        readOnly={mvr}
-        className={cn(
-          mono && "font-mono tracking-wider",
-          mvr && "bg-muted/50 text-foreground"
-        )}
-      />
-    </Field>
+
+      <div className="grid grid-cols-1 gap-0 divide-y divide-border/70 md:grid-cols-2 md:divide-x md:divide-y-0">
+        <div className="p-4">
+          <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+            Registration
+          </p>
+          <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            <SummaryRow label="Plate number" value={record.plateNumber} mono />
+            <SummaryRow
+              label="Truck number"
+              value={record.truckNumber ?? ""}
+              mono
+            />
+            <SummaryRow
+              label="Series"
+              value={record.logbookSeries ?? ""}
+              mono
+            />
+            <SummaryRow
+              label="Number"
+              value={record.logbookNumber ?? ""}
+              mono
+            />
+            <SummaryRow
+              label="Department"
+              value={record.registrationDepartment ?? ""}
+            />
+            <SummaryRow
+              label="Registered"
+              value={record.registrationDate ?? ""}
+            />
+          </dl>
+        </div>
+
+        <div className="p-4">
+          <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+            Vehicle identity
+          </p>
+          <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            <SummaryRow label="Make" value={record.make ?? ""} />
+            <SummaryRow label="Model" value={record.model ?? ""} />
+            <SummaryRow label="Colour" value={record.colour ?? ""} />
+            <SummaryRow label="Fuel" value={record.fuelType ?? ""} />
+            <SummaryRow
+              label="VIN / chassis"
+              value={record.vinOrChassis ?? ""}
+              mono
+            />
+            <SummaryRow label="Engine" value={record.engineNumber ?? ""} mono />
+          </dl>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 border-t border-primary/15 bg-card/70 p-4 md:grid-cols-4">
+        <LogbookMetric
+          label="Gross total"
+          value={formatKg(record.grossWeightTotalKg)}
+        />
+        <LogbookMetric
+          label="Logbook capacity"
+          value={formatKg(record.logbookCapacityKg)}
+        />
+        <LogbookMetric label="Tare" value={formatKg(record.tareWeightKg)} />
+        <LogbookMetric
+          label="Current capacity"
+          value={formatValue(record.currentLogbookCapacity)}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 border-t border-primary/15 p-4 text-sm md:grid-cols-3">
+        <SummaryRow label="Operator" value={record.operatorName ?? ""} />
+        <SummaryRow
+          label="Operator ref"
+          value={record.operatorReference ?? ""}
+          mono
+        />
+        <SummaryRow
+          label="Weighbridge ref"
+          value={record.weighbridgeExternalRef ?? ""}
+          mono
+        />
+        <SummaryRow label="Service type" value={record.serviceType ?? ""} />
+        <SummaryRow label="Exemption" value={record.exemptionStatus ?? ""} />
+        <SummaryRow label="Tyres" value={record.tyreMeasurements ?? ""} />
+      </div>
+    </div>
   )
 }
 
-function WeightChip({
-  tier,
-  active,
-  onClick,
-}: {
-  tier: WeightTier
-  active: boolean
-  onClick: () => void
-}) {
+function LogbookMetric({ label, value }: { label: string; value: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex flex-col items-start gap-0.5 rounded-md border px-2.5 py-2 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-        active
-          ? "border-primary bg-primary/5 ring-1 ring-primary/30"
-          : "border-border bg-card hover:border-primary/30 hover:bg-primary/5"
-      )}
-    >
-      <span
-        className={cn(
-          "text-xs font-semibold",
-          active ? "text-primary" : "text-foreground"
-        )}
-      >
-        {tier.label}
-      </span>
-      <span className="text-[10px] tabular-nums text-muted-foreground">
-        {formatMzn(tier.mznPerDay)} MZN/d
-      </span>
-    </button>
-  )
-}
-
-function UsageCard({
-  id,
-  title,
-  subtitle,
-  selected,
-  onSelect,
-}: {
-  id: string
-  title: string
-  subtitle: string
-  selected: boolean
-  onSelect: () => void
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      onClick={onSelect}
-      className={cn(
-        "group flex items-start gap-3 rounded-lg border p-3.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-        selected
-          ? "border-primary bg-primary/5"
-          : "border-border bg-card hover:border-primary/30"
-      )}
-    >
-      <span
-        aria-hidden
-        className={cn(
-          "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
-          selected ? "border-primary" : "border-muted-foreground/30"
-        )}
-      >
-        {selected && <span className="size-2 rounded-full bg-primary" />}
-      </span>
-      <span className="flex flex-col gap-0.5">
-        <span className="text-sm font-semibold text-foreground">{title}</span>
-        <span className="text-[11px] text-muted-foreground">{subtitle}</span>
-      </span>
-      <input id={id} type="radio" className="sr-only" checked={selected} readOnly />
-    </button>
+    <div className="rounded-lg border border-border bg-background px-3 py-2.5">
+      <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+        {label}
+      </p>
+      <p className="mt-1 font-mono text-sm font-semibold tracking-wider text-foreground">
+        {value}
+      </p>
+    </div>
   )
 }
 
@@ -789,7 +731,7 @@ function PhotosStep({
         </div>
       </Card>
       <Footer
-        backLabel="Back to details"
+        backLabel="Back to logbook"
         continueLabel="Continue to review"
         onBack={onBack}
         onContinue={onContinue}
@@ -809,7 +751,10 @@ function PhotoTile({
   error?: string
   onFile: (file: File | null) => void
 }) {
-  const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
+  const previewUrl = useMemo(
+    () => (file ? URL.createObjectURL(file) : null),
+    [file]
+  )
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -838,8 +783,12 @@ function PhotoTile({
         ) : (
           <>
             <UploadCloud className="size-5 text-muted-foreground group-hover:text-primary" />
-            <span className="text-[11px] text-muted-foreground">Click to upload</span>
-            <span className="text-[10px] text-muted-foreground/70">JPEG/PNG · ≤ 5 MB</span>
+            <span className="text-[11px] text-muted-foreground">
+              Click to upload
+            </span>
+            <span className="text-[10px] text-muted-foreground/70">
+              JPEG/PNG · ≤ 5 MB
+            </span>
           </>
         )}
         <input
@@ -869,12 +818,15 @@ function ReviewStep({
   form,
   onBack,
   onSubmit,
+  isSubmitting,
 }: {
   form: FormState
   onBack: () => void
   onSubmit: () => void
+  isSubmitting: boolean
 }) {
   const tier = weightTierForKg(form.weightKg)
+  const canSubmit = !!form.logbookRecord?.id && !isSubmitting
 
   return (
     <>
@@ -963,13 +915,24 @@ function ReviewStep({
       </Card>
 
       <div className="flex items-center justify-between gap-3 pt-2">
-        <Button variant="outline" size="lg" onClick={onBack} className="rounded-lg">
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={onBack}
+          disabled={isSubmitting}
+          className="rounded-lg"
+        >
           <ArrowLeft />
           Back to photos
         </Button>
-        <Button size="lg" onClick={onSubmit} className="rounded-lg bg-primary">
-          <CheckCircle2 />
-          Register vehicle
+        <Button
+          size="lg"
+          onClick={onSubmit}
+          disabled={!canSubmit}
+          className="rounded-lg bg-primary"
+        >
+          {isSubmitting ? <Spinner /> : <CheckCircle2 />}
+          {isSubmitting ? "Registering…" : "Register vehicle"}
         </Button>
       </div>
     </>
@@ -1035,10 +998,14 @@ function LivePreview({ form }: { form: FormState }) {
         {tier ? (
           <p className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
             {formatMzn(tier.mznPerDay)}{" "}
-            <span className="text-sm font-medium text-muted-foreground">MZN/day</span>
+            <span className="text-sm font-medium text-muted-foreground">
+              MZN/day
+            </span>
           </p>
         ) : (
-          <p className="mt-1 text-sm text-muted-foreground">Enter a weight ≥ 8,000 kg.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Enter a weight ≥ 8,000 kg.
+          </p>
         )}
         {tier && (
           <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
@@ -1055,14 +1022,14 @@ function SourceVerifiedNote() {
     <div className="flex items-start gap-3 rounded-xl border border-secondary/40 bg-accent/60 p-4">
       <ShieldCheck className="mt-0.5 size-4 shrink-0 text-secondary" />
       <div>
-        <p className="text-sm font-semibold text-foreground">Your data is verified at source</p>
+        <p className="text-sm font-semibold text-foreground">
+          Your data is verified at source
+        </p>
         <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-          Plate, VIN and engine number are pulled from MVR and locked. To change them, update your
-          logbook with MVR first.
+          Plate, VIN and engine number are pulled from MVR and locked. To change
+          them, update your logbook with MVR first.
         </p>
       </div>
     </div>
   )
 }
-
-

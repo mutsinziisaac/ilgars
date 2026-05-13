@@ -2,11 +2,8 @@ import { format } from "date-fns"
 import {
   ArrowLeft,
   Bell,
-  CreditCard,
   Plus,
-  Printer,
   Search,
-  UserPlus,
 } from "lucide-react"
 import {
   Link,
@@ -16,13 +13,11 @@ import {
   useSearchParams,
 } from "react-router-dom"
 
+import { useAuth } from "@/components/auth/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { findVehicleByPlate } from "@/lib/fleet"
-
 import { findNavItem } from "./nav-config"
 
-const MOCK_USER_NAME = "Trans Limpopo"
 const MOCK_FLEET_COUNT = 8
 const MOCK_COMPANY_COUNT = 1
 const MOCK_CHEST_ID = "100184"
@@ -37,15 +32,15 @@ export function TopBar() {
   const { pathname } = useLocation()
 
   const onFleetNew = matchPath("/fleet/new", pathname) !== null
-  const detailMatch = matchPath("/fleet/:plate", pathname)
+  const detailMatch = matchPath("/fleet/:vehicleId", pathname)
   const onFleetDetail = detailMatch !== null && !onFleetNew
   const onPayCharges = matchPath("/pay-charges", pathname) !== null
   const onPermits = matchPath("/permits", pathname) !== null
 
   if (onFleetNew) return <CreateTopBar />
   if (onFleetDetail) {
-    const plate = decodeURIComponent(detailMatch!.params.plate ?? "")
-    return <DetailTopBar plate={plate} />
+    const vehicleId = decodeURIComponent(detailMatch!.params.vehicleId ?? "")
+    return <DetailTopBar vehicleId={vehicleId} />
   }
   if (onPayCharges) return <PayChargesTopBar />
   if (onPermits) return <PermitsTopBar />
@@ -88,9 +83,11 @@ function PermitsTopBar() {
 function DefaultTopBar() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const isFleet = pathname === "/fleet"
   const current = findNavItem(pathname)
   const today = format(new Date(), "EEE d MMM yyyy")
+  const displayName = user.firstName ?? user.displayName
 
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
@@ -98,8 +95,8 @@ function DefaultTopBar() {
         {isFleet ? (
           <>
             <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              {MOCK_FLEET_COUNT} vehicles · {MOCK_COMPANY_COUNT} company · Chest ID{" "}
-              {MOCK_CHEST_ID}
+              {MOCK_FLEET_COUNT} vehicles · {MOCK_COMPANY_COUNT} company · Chest
+              ID {MOCK_CHEST_ID}
             </p>
             <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-foreground">
               My fleet
@@ -111,7 +108,7 @@ function DefaultTopBar() {
               {current?.label ?? "Page"} · {today}
             </p>
             <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-foreground">
-              Boa tarde, {MOCK_USER_NAME}
+              Boa tarde, {displayName}
             </h1>
           </>
         )}
@@ -155,7 +152,8 @@ function DefaultTopBar() {
 function CreateTopBar() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const stepKey = (params.get("step") ?? "logbook") as (typeof FLEET_STEP_LABELS)[number]
+  const stepKey = (params.get("step") ??
+    "logbook") as (typeof FLEET_STEP_LABELS)[number]
   const stepIndex = Math.max(0, FLEET_STEP_LABELS.indexOf(stepKey))
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
@@ -193,7 +191,8 @@ function CreateTopBar() {
 function PayChargesTopBar() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const stepKey = (params.get("step") ?? "vehicle") as (typeof PAY_STEP_LABELS)[number]
+  const stepKey = (params.get("step") ??
+    "vehicle") as (typeof PAY_STEP_LABELS)[number]
   const stepIndex = Math.max(0, PAY_STEP_LABELS.indexOf(stepKey))
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
@@ -228,12 +227,8 @@ function PayChargesTopBar() {
   )
 }
 
-function DetailTopBar({ plate }: { plate: string }) {
-  const navigate = useNavigate()
-  const vehicle = findVehicleByPlate(plate)
-  const eyebrow = vehicle
-    ? `My fleet · ${vehicle.model} ${vehicle.year} · Ref ${vehicle.ref}`
-    : "My fleet · Vehicle"
+function DetailTopBar({ vehicleId }: { vehicleId: string }) {
+  const eyebrow = "My fleet · Vehicle"
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
       <div className="flex min-w-0 items-center gap-3">
@@ -249,7 +244,7 @@ function DetailTopBar({ plate }: { plate: string }) {
             {eyebrow}
           </p>
           <h1 className="mt-0.5 truncate font-mono text-xl font-semibold tracking-wider text-foreground">
-            {plate}
+            {vehicleId}
           </h1>
         </div>
       </div>
@@ -264,24 +259,6 @@ function DetailTopBar({ plate }: { plate: string }) {
           />
         </div>
         <NotificationsButton />
-        <Button variant="outline" size="sm" className="rounded-lg">
-          <Printer />
-          Print QR
-        </Button>
-        <Button variant="outline" size="sm" className="rounded-lg">
-          <UserPlus />
-          Reassign driver
-        </Button>
-        <Button
-          size="sm"
-          onClick={() =>
-            navigate(`/pay-charges?vehicle=${encodeURIComponent(plate)}`)
-          }
-          className="rounded-lg bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-        >
-          <CreditCard />
-          Pay charges
-        </Button>
       </div>
     </header>
   )

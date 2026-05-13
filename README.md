@@ -187,6 +187,23 @@ npm run preview       # preview production build
 
 `npm run build` is the floor for "is this branch shippable". Type errors fail the build.
 
+### 6.1 Authentication and API calls
+
+The portal requires Keycloak before rendering protected routes. Create a local
+`.env.local` from `.env.example` and set:
+
+```bash
+VITE_KEYCLOAK_URL=
+VITE_KEYCLOAK_REALM=
+VITE_KEYCLOAK_CLIENT_ID=
+VITE_API_BASE_URL=
+```
+
+Future backend calls should go through `apiRequest` from `src/lib/api.ts` inside
+TanStack Query query/mutation functions. The shared client refreshes the
+Keycloak token before each protected request and sends it as
+`Authorization: Bearer <jwt>`.
+
 ---
 
 ## 7. Rules of engagement (engineers and agents)
