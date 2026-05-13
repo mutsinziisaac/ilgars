@@ -187,7 +187,7 @@ export default function VehicleNew() {
   }
   const back = () => {
     const i = STEP_INDEX[step]
-    if (i === 0) navigate(returnTo ?? "/fleet")
+    if (i === 0) navigate(returnTo ?? "/portal/fleet")
     else goTo(STEPS[i - 1].key)
   }
 
@@ -201,7 +201,7 @@ export default function VehicleNew() {
           description: `${vehicle.truckNumberSnapshot || "Fleet vehicle"} is now active in your fleet.`,
         }
       )
-      navigate(returnTo ?? "/fleet")
+      navigate(returnTo ?? "/portal/fleet")
     },
     onError: (error) => {
       toast.error("Vehicle registration failed", {
@@ -363,7 +363,7 @@ function LogbookStep({
   const [duplicate, setDuplicate] = useState(false)
   const [lookupError, setLookupError] = useState<string | null>(null)
   const lookupMutation = useMutation({
-    mutationFn: getVehicleByPlate,
+    mutationFn: (plate: string) => getVehicleByPlate(plate),
     onSuccess: (record) => {
       const plate = record.plateNumber || compactPlateNumber(plateInput)
       const registrationYear = record.registrationDate

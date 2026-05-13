@@ -1,17 +1,7 @@
 import { useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  ArrowRight,
-  CheckCircle2,
-  RefreshCw,
-  Truck,
-} from "lucide-react"
-import {
-  Link,
-  useLocation,
-  useNavigate,
-  useParams,
-} from "react-router-dom"
+import { ArrowRight, CheckCircle2, RefreshCw, Truck } from "lucide-react"
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -23,12 +13,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { StatusPill } from "@/components/fleet/status-pill"
 import { VehicleIllustration } from "@/components/fleet/vehicle-illustration"
 import {
@@ -37,10 +22,7 @@ import {
 } from "@/lib/fleet-vehicles-api"
 import { capacityClassLabel } from "@/lib/fleet-vehicle-classification"
 import { formatMzn } from "@/lib/fleet"
-import {
-  getTripsByVehicleId,
-  type VehicleTrip,
-} from "@/lib/trips-api"
+import { getTripsByVehicleId, type VehicleTrip } from "@/lib/trips-api"
 import { cn } from "@/lib/utils"
 
 const FLEET_VEHICLES_QUERY_KEY = ["fleet-vehicles", "ACTIVE"] as const
@@ -157,7 +139,10 @@ export default function VehicleDetail() {
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
-          <Button onClick={() => navigate("/fleet")} className="rounded-md">
+          <Button
+            onClick={() => navigate("/portal/fleet")}
+            className="rounded-md"
+          >
             Back to fleet
           </Button>
         </EmptyContent>
@@ -177,7 +162,7 @@ export default function VehicleDetail() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="trips">
             Trips
-            <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+            <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground tabular-nums">
               {tripsQuery.data?.length ?? 0}
             </span>
           </TabsTrigger>
@@ -234,15 +219,21 @@ function VehicleHeroCard({ vehicle }: { vehicle: FleetVehicle }) {
                 {vehicle.plateNumberSnapshot}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Truck <span className="font-mono">{vehicle.truckNumberSnapshot}</span> ·
-                Vehicle ID <span className="font-mono">{vehicle.vehicleId}</span>
+                Truck{" "}
+                <span className="font-mono">{vehicle.truckNumberSnapshot}</span>{" "}
+                · Vehicle ID{" "}
+                <span className="font-mono">{vehicle.vehicleId}</span>
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              <StatusPill tone={vehicle.compliantForRating ? "compliant" : "warning"}>
+              <StatusPill
+                tone={vehicle.compliantForRating ? "compliant" : "warning"}
+              >
                 {vehicle.compliantForRating ? "Compliant" : "Not compliant"}
               </StatusPill>
-              <StatusPill tone="neutral">{statusLabel(vehicle.status)}</StatusPill>
+              <StatusPill tone="neutral">
+                {statusLabel(vehicle.status)}
+              </StatusPill>
             </div>
           </div>
         </div>
@@ -250,7 +241,10 @@ function VehicleHeroCard({ vehicle }: { vehicle: FleetVehicle }) {
       <div className="grid grid-cols-2 gap-px border-t border-border bg-border md:grid-cols-4">
         <StatCell label="Capacity" value={formatCapacity(vehicle)} />
         <StatCell label="Class" value={capacityClassLabel(vehicle)} />
-        <StatCell label="Registry" value={statusLabel(vehicle.registryStatus)} />
+        <StatCell
+          label="Registry"
+          value={statusLabel(vehicle.registryStatus)}
+        />
         <StatCell label="Added" value={displayDate(vehicle.addedAt)} />
       </div>
     </section>
@@ -295,7 +289,12 @@ function StatCell({
       <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
         {label}
       </p>
-      <p className={cn("mt-0.5 text-sm font-semibold text-foreground", mono && "font-mono")}>
+      <p
+        className={cn(
+          "mt-0.5 text-sm font-semibold text-foreground",
+          mono && "font-mono"
+        )}
+      >
         {value}
       </p>
     </div>
@@ -318,7 +317,10 @@ function VehicleFactsCard({ vehicle }: { vehicle: FleetVehicle }) {
         <DetailField label="Operator" value={vehicle.operatorNameSnapshot} />
         <DetailField label="Fleet ID" value={vehicle.fleetId} mono />
         <DetailField label="Fleet vehicle ID" value={vehicle.id} mono />
-        <DetailField label="Snapshot at" value={displayDate(vehicle.vehicleSnapshotAt)} />
+        <DetailField
+          label="Snapshot at"
+          value={displayDate(vehicle.vehicleSnapshotAt)}
+        />
         <DetailField label="Updated" value={displayDate(vehicle.updatedAt)} />
         <DetailField label="Source" value={statusLabel(vehicle.source)} />
         <DetailField label="Added by" value={vehicle.addedBySubject} mono />
@@ -341,7 +343,12 @@ function DetailField({
       <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
         {label}
       </p>
-      <p className={cn("truncate text-sm text-foreground", mono && "font-mono text-xs")}>
+      <p
+        className={cn(
+          "truncate text-sm text-foreground",
+          mono && "font-mono text-xs"
+        )}
+      >
         {value || "-"}
       </p>
     </div>
@@ -366,7 +373,9 @@ function TripsCard({
   return (
     <section className="flex flex-col rounded-xl border border-border bg-card">
       <div className="flex items-center justify-between gap-4 px-5 pt-4 pb-2">
-        <h3 className="text-sm font-semibold tracking-tight text-foreground">Trips</h3>
+        <h3 className="text-sm font-semibold tracking-tight text-foreground">
+          Trips
+        </h3>
         <span className="text-xs text-muted-foreground">
           {trips.length} total
         </span>
@@ -387,7 +396,9 @@ function TripsCard({
         </div>
       ) : error ? (
         <div className="flex flex-col items-center gap-3 border-t border-border px-5 py-8 text-center">
-          <p className="text-sm font-medium text-foreground">Could not load trips.</p>
+          <p className="text-sm font-medium text-foreground">
+            Could not load trips.
+          </p>
           <p className="text-xs text-muted-foreground">
             {error instanceof Error ? error.message : "Try again."}
           </p>
@@ -415,15 +426,21 @@ function TripsCard({
                   {trip.reason}
                 </span>
               </span>
-              <span className="text-xs text-foreground">{statusLabel(trip.status)}</span>
-              <span className="text-xs text-foreground">{statusLabel(trip.billingStatus)}</span>
+              <span className="text-xs text-foreground">
+                {statusLabel(trip.status)}
+              </span>
+              <span className="text-xs text-foreground">
+                {statusLabel(trip.billingStatus)}
+              </span>
               <span className="text-xs text-muted-foreground">
                 {trip.feeCount} fee{trip.feeCount === 1 ? "" : "s"}
               </span>
               <span className="text-xs text-muted-foreground">
                 {formatAmount(trip.outstandingFeeAmount)}
               </span>
-              <span className="text-xs text-muted-foreground">{tripDuration(trip)}</span>
+              <span className="text-xs text-muted-foreground">
+                {tripDuration(trip)}
+              </span>
               <span className="min-w-0 truncate text-xs text-muted-foreground">
                 {trip.paymentMode} · {trip.createdBy}
               </span>

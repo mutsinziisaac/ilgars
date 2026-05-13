@@ -2,7 +2,7 @@ import {
   FileText,
   LayoutGrid,
   Receipt,
-  Truck,
+  Route,
   type LucideIcon,
 } from "lucide-react"
 
@@ -14,14 +14,16 @@ export type NavItem = {
 }
 
 export const NAV_ITEMS: readonly NavItem[] = [
-  { path: "/", label: "Overview", icon: LayoutGrid },
-  { path: "/fleet", label: "My fleet", icon: Truck },
-  { path: "/permits", label: "Permits", icon: FileText, badge: 2 },
-  { path: "/transactions", label: "Transactions", icon: Receipt },
+  { path: "/portal", label: "Overview", icon: LayoutGrid },
+  { path: "/portal/fleet", label: "My trips", icon: Route },
+  { path: "/portal/permits", label: "Permits", icon: FileText, badge: 2 },
+  { path: "/portal/transactions", label: "Transactions", icon: Receipt },
 ] as const
 
 export function findNavItem(pathname: string): NavItem | undefined {
   return NAV_ITEMS.find((item) =>
-    item.path === "/" ? pathname === "/" : pathname.startsWith(item.path)
+    item.path === "/portal"
+      ? pathname === "/portal"
+      : pathname.startsWith(item.path)
   )
 }

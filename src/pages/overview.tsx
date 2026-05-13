@@ -127,7 +127,7 @@ function FleetAtAGlance() {
           </p>
         </div>
         <NavLink
-          to="/fleet"
+          to="/portal/fleet"
           className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
         >
           Manage fleet
@@ -152,15 +152,13 @@ function FleetAtAGlance() {
             <span className="text-sm font-medium tracking-wide text-foreground">
               {truck.plate}
             </span>
-            <span className="text-xs text-muted-foreground">
-              {truck.class}
-            </span>
+            <span className="text-xs text-muted-foreground">{truck.class}</span>
             <StatusPill status={truck.status} />
             <span className="text-xs text-muted-foreground">
               {truck.trip ?? "—"}
             </span>
             <NavLink
-              to="/fleet"
+              to="/portal/fleet"
               className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
               Open
@@ -178,7 +176,7 @@ function StatusPill({ status }: { status: "compliant" | "renewal-soon" }) {
     return (
       <Badge
         variant="secondary"
-        className="bg-chart-1/60 text-primary px-2 py-0.5 text-[11px]"
+        className="bg-chart-1/60 px-2 py-0.5 text-[11px] text-primary"
       >
         Compliant
       </Badge>
@@ -187,7 +185,7 @@ function StatusPill({ status }: { status: "compliant" | "renewal-soon" }) {
   return (
     <Badge
       variant="secondary"
-      className="bg-accent text-accent-foreground px-2 py-0.5 text-[11px]"
+      className="bg-accent px-2 py-0.5 text-[11px] text-accent-foreground"
     >
       Renewal soon
     </Badge>
@@ -325,7 +323,7 @@ function SpendingChart() {
         </div>
         <Badge
           variant="secondary"
-          className="bg-chart-1/60 text-primary gap-1 px-2 py-0.5 text-[11px]"
+          className="gap-1 bg-chart-1/60 px-2 py-0.5 text-[11px] text-primary"
         >
           <TrendingUp className="size-3" />
           +8.4%
