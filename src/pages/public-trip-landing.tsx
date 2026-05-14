@@ -9,8 +9,8 @@ import {
   LockKeyhole,
   MapPinned,
   Search,
-  Truck,
 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { StatusPill } from "@/components/fleet/status-pill"
@@ -20,27 +20,43 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import {
   compactPlateNumber,
-  getVehicleByPlate,
   type MotorVehicleLogbook,
 } from "@/lib/motor-vehicle-api"
 import {
   createPublicPrepaidTrip,
+  getPublicPrepaidTripVehicleByPlate,
   listMunicipalRoutes,
   MUNICIPALITY_ID,
   type MunicipalRoute,
   type TripCreateResult,
   type TripInvoice,
 } from "@/lib/trips-api"
-import {
-  formatMzn,
-  WEIGHT_TIERS,
-  weightTierForKg,
-  type Vehicle,
-} from "@/lib/fleet"
+import { WEIGHT_TIERS, weightTierForKg, type Vehicle } from "@/lib/fleet"
+import { formatCurrencyMzn } from "@/i18n/format"
+import { isHeavyVehicleWeightKg } from "@/lib/fleet-vehicle-classification"
 import { classifyFleetVehicle, type WeightCategory } from "@/lib/v4-rules"
 import { cn } from "@/lib/utils"
 
 const DURATION_OPTIONS = [1, 2, 7, 14, 30] as const
+
+const VEHICLE_IMAGES = [
+  "/vehicle-weight-8-16.png",
+  "/vehicle-weight-16-25.png",
+  "/vehicle-weight-25-38.png",
+  "/vehicle-weight-38-48.png",
+  "/vehicle-weight-48-plus.png",
+] as const
+
+const VEHICLE_IMAGE_BY_WEIGHT_TIER: Record<
+  (typeof WEIGHT_TIERS)[number]["key"],
+  (typeof VEHICLE_IMAGES)[number]
+> = {
+  "8-16": VEHICLE_IMAGES[0],
+  "16-25": VEHICLE_IMAGES[1],
+  "25-38": VEHICLE_IMAGES[2],
+  "38-48": VEHICLE_IMAGES[3],
+  "48+": VEHICLE_IMAGES[4],
+}
 
 function normalizeCapacityKg(vehicle: MotorVehicleLogbook): number {
   const raw =
@@ -52,8 +68,8 @@ function normalizeCapacityKg(vehicle: MotorVehicleLogbook): number {
   return raw <= 200 ? Math.round(raw * 1000) : Math.round(raw)
 }
 
-function plateLabel(plate: string): string {
-  return plate.toUpperCase().replace(/[^A-Z0-9]/g, "")
+function plateLabel(plate: string | null | undefined): string {
+  return (plate ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")
 }
 
 function motorVehicleToVehicle(record: MotorVehicleLogbook): Vehicle {
@@ -73,7 +89,7 @@ function motorVehicleToVehicle(record: MotorVehicleLogbook): Vehicle {
     configuration: weightKg >= 25_000 ? "4x2 articulated" : "Rigid",
     weightKg,
     color: record.colour ?? "Not recorded",
-    rucClass: weightKg > 16_000 ? "Heavy vehicle" : "Medium vehicle",
+    rucClass: isHeavyVehicleWeightKg(weightKg) ? "Heavy vehicle" : "Medium vehicle",
     chassisVin: record.vinOrChassis ?? record.id,
     engineNumber: record.engineNumber ?? "Not recorded",
     logbookRef: record.logbookNumber ?? record.logbookSeries ?? "MVR record",
@@ -115,7 +131,13 @@ function estimateTotal(vehicle: Vehicle | null, days: number) {
   return Math.min(tier.mznPerDay * days, 20_000)
 }
 
+function imageForWeightKg(weightKg: number) {
+  const tier = weightTierForKg(weightKg)
+  return tier ? VEHICLE_IMAGE_BY_WEIGHT_TIER[tier.key] : VEHICLE_IMAGES[0]
+}
+
 export default function PublicTripLanding() {
+  const { t } = useTranslation()
   const [plate, setPlate] = useState("")
   const [record, setRecord] = useState<MotorVehicleLogbook | null>(null)
   const [durationDays, setDurationDays] = useState(2)
@@ -148,7 +170,7 @@ export default function PublicTripLanding() {
   const lookupVehicle = async () => {
     const compact = compactPlateNumber(plate)
     if (!compact) {
-      setLookupError("Enter a plate number.")
+      setLookupError(t("landing.enterPlate"))
       return
     }
     setIsLookingUp(true)
@@ -156,16 +178,19 @@ export default function PublicTripLanding() {
     setResult(null)
     setRouteId(null)
     try {
-      const next = await getVehicleByPlate(compact, { skipAuth: true })
+      const next = await getPublicPrepaidTripVehicleByPlate(compact)
+      const displayPlate = plateLabel(next.plateNumber || compact)
       setRecord(next)
-      setPlate(plateLabel(next.plateNumber))
-      toast.success("Vehicle found", {
-        description: `${plateLabel(next.plateNumber)} is ready for prepaid trip creation.`,
+      setPlate(displayPlate)
+      toast.success(t("landing.vehicleFound"), {
+        description: t("landing.vehicleFoundDescription", {
+          plate: displayPlate,
+        }),
       })
     } catch (error) {
       setRecord(null)
       setLookupError(
-        error instanceof Error ? error.message : "Vehicle was not found."
+        error instanceof Error ? error.message : t("landing.vehicleNotFound")
       )
     } finally {
       setIsLookingUp(false)
@@ -175,8 +200,8 @@ export default function PublicTripLanding() {
   const createTrip = async () => {
     if (!vehicle) return
     if (!MUNICIPALITY_ID) {
-      toast.error("Municipality ID missing", {
-        description: "Set VITE_MUNICIPALITY_ID before creating public trips.",
+      toast.error(t("landing.municipalityMissing"), {
+        description: t("landing.municipalityMissingDescription"),
       })
       return
     }
@@ -192,12 +217,15 @@ export default function PublicTripLanding() {
         ...(routeId ? { routeId } : {}),
       })
       setResult(created)
-      toast.success("Trip declared", {
-        description: `PRN ${invoicePrn(created.invoice)} is ready for payment.`,
+      toast.success(t("landing.tripDeclared"), {
+        description: t("landing.tripDeclaredDescription", {
+          prn: invoicePrn(created.invoice),
+        }),
       })
     } catch (error) {
-      toast.error("Trip creation failed", {
-        description: error instanceof Error ? error.message : "Try again.",
+      toast.error(t("landing.tripCreationFailed"), {
+        description:
+          error instanceof Error ? error.message : t("landing.tryAgain"),
       })
     } finally {
       setIsCreating(false)
@@ -218,40 +246,41 @@ export default function PublicTripLanding() {
           <div className="flex items-center gap-2.5">
             <img
               src="/maputo-logo.webp"
-              alt="Municipio de Maputo"
+              alt={t("common.municipalityMaputo")}
               className="size-10 rounded-lg bg-white object-contain p-1"
             />
             <div>
               <p className="text-sm font-semibold tracking-tight">ILGARS</p>
               <p className="text-[10px] font-medium tracking-widest text-white/60 uppercase">
-                Public prepaid trip
+                {t("shell.publicTrip")}
               </p>
             </div>
           </div>
-          <Button asChild variant="secondary" className="rounded-lg">
-            <Link to="/portal">
-              <LockKeyhole className="size-4" />
-              Sign in
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="secondary" className="rounded-lg">
+              <Link to="/portal">
+                <LockKeyhole className="size-4" />
+                {t("shell.signIn")}
+              </Link>
+            </Button>
+          </div>
         </header>
 
         <section className="grid flex-1 items-center gap-8 py-10 lg:grid-cols-[minmax(0,0.9fr)_520px]">
           <div className="max-w-2xl">
             <Badge className="border-white/20 bg-white/10 text-white hover:bg-white/10">
-              No login required
+              {t("landing.noLoginRequired")}
             </Badge>
             <h1 className="mt-5 max-w-xl text-5xl leading-[0.95] font-semibold tracking-tight text-white sm:text-6xl">
-              Declare a Maputo trip before the truck reaches the city.
+              {t("landing.hero")}
             </h1>
             <p className="mt-5 max-w-lg text-base leading-7 text-white/72">
-              Look up the vehicle by plate, choose the circulation period, and
-              generate a prepaid PRN from the public ILGARS service.
+              {t("landing.subhero")}
             </p>
             <div className="mt-7 grid max-w-xl grid-cols-3 gap-3">
-              <Metric label="Lookup" value="MVR" />
-              <Metric label="Payment" value="PRN" />
-              <Metric label="Coverage" value="1-30d" />
+              <Metric label={t("landing.metricLookup")} value="MVR" />
+              <Metric label={t("landing.metricPayment")} value="PRN" />
+              <Metric label={t("landing.metricCoverage")} value="1-30d" />
             </div>
           </div>
 
@@ -259,15 +288,15 @@ export default function PublicTripLanding() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
-                  Create prepaid trip
+                  {t("landing.createPrepaidTrip")}
                 </p>
                 <h2 className="mt-1 text-xl font-semibold tracking-tight">
-                  Vehicle lookup
+                  {t("landing.vehicleLookup")}
                 </h2>
               </div>
               {category && (
                 <StatusPill tone={isHeavy ? "warning" : "compliant"}>
-                  {isHeavy ? "Route required" : "Direct PRN"}
+                  {isHeavy ? t("common.routeRequired") : t("common.directPrn")}
                 </StatusPill>
               )}
             </div>
@@ -297,7 +326,7 @@ export default function PublicTripLanding() {
                 className="h-10 rounded-lg"
               >
                 {isLookingUp ? <Spinner /> : <Search className="size-4" />}
-                Lookup
+                {t("common.lookup")}
               </Button>
             </div>
 
@@ -311,33 +340,42 @@ export default function PublicTripLanding() {
               <div className="mt-4 space-y-4">
                 <div className="rounded-lg border border-border bg-card p-4">
                   <div className="flex items-start gap-3">
-                    <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                      <Truck className="size-5" />
+                    <span className="flex h-14 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40">
+                      <img
+                        src={imageForWeightKg(vehicle.weightKg)}
+                        alt=""
+                        aria-hidden
+                        className="h-full w-full object-contain p-1"
+                      />
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="font-mono text-lg font-semibold tracking-wide">
                         {vehicle.plate}
                       </p>
                       <p className="truncate text-sm text-muted-foreground">
-                        {vehicle.model} · {formatMzn(vehicle.weightKg)} kg
+                        {vehicle.model} · {formatCurrencyMzn(vehicle.weightKg)}{" "}
+                        kg
                       </p>
                     </div>
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-                    <Fact label="Vehicle ID" value={vehicle.ref} mono />
-                    <Fact label="Logbook" value={vehicle.logbookRef} mono />
                     <Fact
-                      label="Operator"
+                      label={t("landing.logbook")}
+                      value={vehicle.logbookRef}
+                      mono
+                    />
+                    <Fact
+                      label={t("common.operator")}
                       value={record?.operatorName ?? "-"}
                     />
-                    <Fact label="Class" value={category ?? "-"} />
+                    <Fact label={t("common.class")} value={category ?? "-"} />
                   </div>
                 </div>
 
                 <div>
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
                     <CalendarDays className="size-4 text-muted-foreground" />
-                    Circulation period
+                    {t("landing.circulationPeriod")}
                   </div>
                   <div className="grid grid-cols-5 gap-2">
                     {DURATION_OPTIONS.map((days) => (
@@ -365,12 +403,12 @@ export default function PublicTripLanding() {
                   <div className="rounded-lg border border-border bg-muted/30 p-3">
                     <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
                       <MapPinned className="size-4 text-muted-foreground" />
-                      Heavy route
+                      {t("landing.heavyRoute")}
                     </div>
                     {routesQuery.isLoading ? (
                       <p className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Spinner />
-                        Loading active routes...
+                        {t("landing.loadingRoutes")}
                       </p>
                     ) : routes.length > 0 ? (
                       <div className="max-h-40 space-y-1 overflow-y-auto">
@@ -412,7 +450,7 @@ export default function PublicTripLanding() {
                   className="w-full rounded-lg"
                 >
                   {isCreating ? <Spinner /> : <CreditCard className="size-4" />}
-                  Generate prepaid PRN
+                  {t("landing.generatePrn")}
                   <ArrowRight className="size-4" />
                 </Button>
               </div>
@@ -426,14 +464,17 @@ export default function PublicTripLanding() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold">
-                      Trip declared · PRN generated
+                      {t("landing.tripDeclaredGenerated")}
                     </p>
                     <p className="mt-1 font-mono text-lg font-semibold tracking-wide">
                       {invoicePrn(result.invoice)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Trip {result.trip.id} · {formatMzn(total)}{" "}
-                      {result.invoice?.currency ?? "MZN"}
+                      {t("landing.tripAmount", {
+                        tripId: result.trip.id,
+                        amount: formatCurrencyMzn(total),
+                        currency: result.invoice?.currency ?? "MZN",
+                      })}
                     </p>
                   </div>
                 </div>
@@ -484,10 +525,10 @@ function Fact({
 }
 
 function UnknownRouteNotice() {
+  const { t } = useTranslation()
   return (
     <div className="mt-2 rounded-md border border-secondary/40 bg-accent/60 p-3 text-xs leading-relaxed text-muted-foreground">
-      Unknown heavy routes require municipal and security review. Sign in to the
-      transporter portal or contact the municipality before generating a PRN.
+      {t("landing.unknownRouteNotice")}
     </div>
   )
 }

@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import { PermitCard } from "@/components/permits/permit-card"
 import {
-  PERMIT_STATUS_LABELS,
   permitStatusCounts,
   permitsByStatus,
   type PermitStatus,
@@ -20,12 +20,8 @@ const TAB_ORDER: TabKey[] = [
   "completed",
 ]
 
-const TAB_LABELS: Record<TabKey, string> = {
-  all: "All",
-  ...PERMIT_STATUS_LABELS,
-}
-
 export default function Permits() {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>("all")
   const counts = useMemo(() => permitStatusCounts(), [])
   const visible = useMemo(() => permitsByStatus(tab), [tab])
@@ -47,7 +43,7 @@ export default function Permits() {
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <span>{TAB_LABELS[key]}</span>
+              <span>{t(tabLabelKey(key))}</span>
               <span
                 className={cn(
                   "inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium",
@@ -71,7 +67,7 @@ export default function Permits() {
 
       {visible.length === 0 ? (
         <div className="flex h-48 items-center justify-center rounded-2xl border border-dashed border-border bg-card/60 text-sm text-muted-foreground">
-          No permits in this status.
+          {t("permits.noPermits")}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
@@ -82,4 +78,10 @@ export default function Permits() {
       )}
     </div>
   )
+}
+
+function tabLabelKey(key: TabKey) {
+  if (key === "pending-review") return "permits.tabs.pendingReview"
+  if (key === "awaiting-payment") return "permits.tabs.awaitingPayment"
+  return `permits.tabs.${key}`
 }

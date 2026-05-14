@@ -1,4 +1,5 @@
 import { ChevronDown, LogOut, Plus, UserRound } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { NavLink } from "react-router-dom"
 
 import { useAuth } from "@/components/auth/auth-context"
@@ -9,8 +10,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { WALLET_BALANCE_MZN, formatMzn } from "@/lib/fleet"
@@ -24,10 +23,11 @@ const MOCK_WALLET = {
 }
 
 export function AppSidebar() {
+  const { t } = useTranslation()
   const { user, logout } = useAuth()
   const accountLabel = user.chestId
     ? `Chest ID ${user.chestId}`
-    : (user.email ?? user.username ?? "Authenticated")
+    : (user.email ?? user.username ?? t("shell.authenticated"))
 
   return (
     <aside className="sticky top-0 flex h-svh w-60 shrink-0 flex-col gap-3 bg-sidebar p-3 text-sidebar-foreground">
@@ -40,14 +40,14 @@ export function AppSidebar() {
         <div className="flex min-w-0 flex-col leading-tight">
           <span className="text-sm font-semibold">ILGARS</span>
           <span className="text-[9px] font-medium tracking-widest text-sidebar-foreground/60 uppercase">
-            Transporter portal
+            {t("shell.transporterPortal")}
           </span>
         </div>
       </div>
 
       <div className="rounded-xl bg-sidebar-accent p-3 text-sidebar-accent-foreground">
         <p className="text-[9px] font-medium tracking-widest text-sidebar-foreground/60 uppercase">
-          Wallet · MZN
+          {t("shell.walletMzn")}
         </p>
         <p className="mt-0.5 mb-2.5 font-semibold tracking-tight">
           <span className="text-2xl">{MOCK_WALLET.whole}</span>
@@ -57,7 +57,7 @@ export function AppSidebar() {
         </p>
         <Button variant="secondary" size="sm" className="w-full">
           <Plus />
-          Top up wallet
+          {t("shell.topUpWallet")}
         </Button>
       </div>
 
@@ -87,7 +87,7 @@ export function AppSidebar() {
                     />
                   )}
                   <Icon className="size-4 shrink-0" />
-                  <span className="flex-1 text-[13px]">{item.label}</span>
+                  <span className="flex-1 text-[13px]">{t(item.labelKey)}</span>
                   {item.badge !== undefined && (
                     <Badge
                       variant="secondary"
@@ -128,16 +128,9 @@ export function AppSidebar() {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuLabel>
-            <span className="block truncate text-foreground">
-              {user.displayName}
-            </span>
-            <span className="block truncate font-normal">{accountLabel}</span>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
           <DropdownMenuItem disabled>
             <UserRound />
-            Transporter account
+            {t("shell.transporterAccount")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={(event) => {
@@ -146,7 +139,7 @@ export function AppSidebar() {
             }}
           >
             <LogOut />
-            Sign out
+            {t("shell.signOut")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

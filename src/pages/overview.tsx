@@ -8,6 +8,7 @@ import {
   Wallet,
 } from "lucide-react"
 import { NavLink } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -18,6 +19,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 import { cn } from "@/lib/utils"
+import { formatCurrencyMzn } from "@/i18n/format"
 
 export default function Overview() {
   return (
@@ -46,27 +48,29 @@ export default function Overview() {
 }
 
 const STATUS_METRICS: {
-  label: string
-  value: string
+  labelKey: string
+  valueKey?: string
+  value?: string
   accent?: boolean
 }[] = [
-  { label: "Fleet status", value: "All compliant", accent: true },
-  { label: "Active trips", value: "1" },
-  { label: "Paid this month", value: "47,500" },
-  { label: "Next renewal", value: "4d" },
+  { labelKey: "overview.fleetStatus", valueKey: "overview.allCompliant", accent: true },
+  { labelKey: "overview.activeTrips", value: "1" },
+  { labelKey: "overview.paidThisMonth", value: "47,500" },
+  { labelKey: "overview.nextRenewal", value: "4d" },
 ]
 
 function FleetStatusStrip() {
+  const { t } = useTranslation()
   return (
     <div className="relative overflow-hidden rounded-xl bg-sidebar text-sidebar-foreground">
       <div className="grid grid-cols-2 gap-y-4 px-6 py-5 md:grid-cols-4">
         {STATUS_METRICS.map((metric) => (
-          <div key={metric.label} className="relative flex flex-col gap-1.5">
+          <div key={metric.labelKey} className="relative flex flex-col gap-1.5">
             <p className="text-[10px] font-medium tracking-widest text-secondary uppercase">
-              {metric.label}
+              {t(metric.labelKey)}
             </p>
             <p className="text-2xl font-semibold tracking-tight">
-              {metric.value}
+              {metric.valueKey ? t(metric.valueKey) : metric.value}
             </p>
             {metric.accent && (
               <span
@@ -115,31 +119,32 @@ const FLEET = [
 ]
 
 function FleetAtAGlance() {
+  const { t } = useTranslation()
   return (
     <Card>
       <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-3">
         <div>
           <h2 className="text-sm font-semibold tracking-tight text-foreground">
-            Fleet at a glance
+            {t("overview.fleetAtGlance")}
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            5 vehicles · 2 in city
+            {t("overview.vehiclesInCity", { vehicles: 5, count: 2 })}
           </p>
         </div>
         <NavLink
           to="/portal/fleet"
           className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
         >
-          Manage fleet
+          {t("overview.manageFleet")}
           <ArrowUpRight className="size-3.5" />
         </NavLink>
       </div>
 
       <div className="grid grid-cols-[1.1fr_1.6fr_1fr_1.4fr_auto] items-center gap-x-4 px-5 pb-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-        <span>Plate</span>
-        <span>Class</span>
-        <span>Status</span>
-        <span>Active trip</span>
+        <span>{t("common.plate")}</span>
+        <span>{t("common.class")}</span>
+        <span>{t("common.status")}</span>
+        <span>{t("overview.activeTrip")}</span>
         <span />
       </div>
 
@@ -161,7 +166,7 @@ function FleetAtAGlance() {
               to="/portal/fleet"
               className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
-              Open
+              {t("overview.open")}
               <ArrowUpRight className="size-3" />
             </NavLink>
           </li>
@@ -172,13 +177,14 @@ function FleetAtAGlance() {
 }
 
 function StatusPill({ status }: { status: "compliant" | "renewal-soon" }) {
+  const { t } = useTranslation()
   if (status === "compliant") {
     return (
       <Badge
         variant="secondary"
         className="bg-chart-1/60 px-2 py-0.5 text-[11px] text-primary"
       >
-        Compliant
+        {t("overview.compliant")}
       </Badge>
     )
   }
@@ -187,65 +193,65 @@ function StatusPill({ status }: { status: "compliant" | "renewal-soon" }) {
       variant="secondary"
       className="bg-accent px-2 py-0.5 text-[11px] text-accent-foreground"
     >
-      Renewal soon
+      {t("overview.renewalSoon")}
     </Badge>
   )
 }
 
-const ATTENTION = [
-  {
-    icon: Clock,
-    iconBg: "bg-accent text-secondary",
-    title: "Renewal in 4 days",
-    subtitle: "Circulation licence — AAJ 119 MC",
-    amount: "2,000",
-  },
-  {
-    icon: FileCheck,
-    iconBg: "bg-chart-1/60 text-primary",
-    title: "Permit awaiting payment",
-    subtitle: "PRM-26-0823 · Filming · Approved",
-    amount: "150,000",
-  },
-  {
-    icon: Receipt,
-    iconBg: "bg-muted text-muted-foreground",
-    title: "Receipt available",
-    subtitle: "TX-08471 · Cargo licence 5d",
-    amount: "15,000",
-  },
-  {
-    icon: Wallet,
-    iconBg: "bg-accent text-secondary",
-    title: "Wallet running low",
-    subtitle: "Balance below 5,000 MZN",
-    amount: "4,250",
-  },
-  {
-    icon: AlertCircle,
-    iconBg: "bg-chart-1/60 text-primary",
-    title: "Daily authorisation due",
-    subtitle: "AAB 482 MC · ends today",
-    amount: "1,000",
-  },
-]
-
 function WhatNeedsAttention() {
+  const { t } = useTranslation()
+  const attention = [
+    {
+      icon: Clock,
+      iconBg: "bg-accent text-secondary",
+      title: t("overview.renewalIn4Days"),
+      subtitle: t("overview.circulationLicenceVehicle", { plate: "AAJ 119 MC" }),
+      amount: "2,000",
+    },
+    {
+      icon: FileCheck,
+      iconBg: "bg-chart-1/60 text-primary",
+      title: t("overview.permitAwaitingPayment"),
+      subtitle: "PRM-26-0823 · Filming · Approved",
+      amount: "150,000",
+    },
+    {
+      icon: Receipt,
+      iconBg: "bg-muted text-muted-foreground",
+      title: t("overview.receiptAvailable"),
+      subtitle: "TX-08471 · Cargo licence 5d",
+      amount: "15,000",
+    },
+    {
+      icon: Wallet,
+      iconBg: "bg-accent text-secondary",
+      title: t("overview.walletRunningLow"),
+      subtitle: t("overview.balanceBelow", { amount: "5,000" }),
+      amount: "4,250",
+    },
+    {
+      icon: AlertCircle,
+      iconBg: "bg-chart-1/60 text-primary",
+      title: t("overview.dailyAuthorisationDue"),
+      subtitle: t("overview.endsToday", { plate: "AAB 482 MC" }),
+      amount: "1,000",
+    },
+  ]
   return (
     <Card>
       <div className="flex items-center justify-between gap-4 px-5 pt-5 pb-1">
         <h2 className="text-sm font-semibold tracking-tight text-foreground">
-          What needs attention
+          {t("overview.whatNeedsAttention")}
         </h2>
         <button
           type="button"
           className="text-xs font-medium text-primary hover:underline"
         >
-          See all
+          {t("overview.seeAll")}
         </button>
       </div>
       <ul className="px-2 pt-2 pb-3">
-        {ATTENTION.map((item) => {
+        {attention.map((item) => {
           const Icon = item.icon
           return (
             <li
@@ -307,15 +313,16 @@ const chartConfig = {
 } satisfies ChartConfig
 
 function SpendingChart() {
+  const { t } = useTranslation()
   return (
     <Card>
       <div className="flex items-start justify-between gap-4 px-5 pt-5">
         <div>
           <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-            Spending · 12 months
+            {t("overview.spending12")}
           </p>
           <p className="mt-0.5 text-2xl font-semibold tracking-tight text-foreground">
-            {SPENDING_TOTAL.toLocaleString()}{" "}
+            {formatCurrencyMzn(SPENDING_TOTAL)}{" "}
             <span className="text-sm font-medium text-muted-foreground">
               MZN
             </span>
@@ -363,7 +370,7 @@ function SpendingChart() {
                         {String(name)}
                       </span>
                       <span className="font-mono font-medium text-foreground tabular-nums">
-                        {Number(value).toLocaleString()}
+                        {formatCurrencyMzn(Number(value))}
                         <span className="ml-1 text-[10px] text-muted-foreground">
                           MZN
                         </span>
@@ -392,49 +399,24 @@ function SpendingChart() {
   )
 }
 
-const RECEIPTS = [
-  {
-    date: "4 May",
-    title: "Cargo licence · 5 days",
-    plate: "AAB 482 MC",
-    amount: "15,000",
-  },
-  {
-    date: "28 Apr",
-    title: "Daily authorisation",
-    plate: "AAJ 119 MC",
-    amount: "1,000",
-  },
-  {
-    date: "22 Apr",
-    title: "Cargo licence · 3 days",
-    plate: "ABT 770 MC",
-    amount: "9,000",
-  },
-  {
-    date: "15 Apr",
-    title: "Special circulation",
-    plate: "AAB 482 MC",
-    amount: "20,000",
-  },
-  {
-    date: "8 Apr",
-    title: "Cargo licence · 2 days",
-    plate: "ABT 770 MC",
-    amount: "6,000",
-  },
-]
-
 function RecentReceipts() {
+  const { t } = useTranslation()
+  const receipts = [
+    { date: "4 May", title: t("overview.cargoLicenceDays", { count: 5 }), plate: "AAB 482 MC", amount: "15,000" },
+    { date: "28 Apr", title: t("overview.dailyAuthorisation"), plate: "AAJ 119 MC", amount: "1,000" },
+    { date: "22 Apr", title: t("overview.cargoLicenceDays", { count: 3 }), plate: "ABT 770 MC", amount: "9,000" },
+    { date: "15 Apr", title: t("overview.specialCirculation"), plate: "AAB 482 MC", amount: "20,000" },
+    { date: "8 Apr", title: t("overview.cargoLicenceDays", { count: 2 }), plate: "ABT 770 MC", amount: "6,000" },
+  ]
   return (
     <Card>
       <div className="flex items-center justify-between gap-4 px-5 pt-5 pb-1">
         <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-          Recent receipts
+          {t("overview.recentReceipts")}
         </p>
       </div>
       <ul className="divide-y divide-border px-5">
-        {RECEIPTS.map((receipt) => (
+        {receipts.map((receipt) => (
           <li
             key={receipt.title + receipt.date}
             className="flex items-center gap-3 py-2.5"

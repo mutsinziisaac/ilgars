@@ -1,4 +1,8 @@
 import { apiRequest, resolveApiBaseUrl } from "@/lib/api"
+import {
+  compactPlateNumber,
+  type MotorVehicleLogbook,
+} from "@/lib/motor-vehicle-api"
 
 const CORE_API_BASE_URL = resolveApiBaseUrl(
   import.meta.env.VITE_API_BASE_URL,
@@ -35,6 +39,50 @@ export type VehicleTrip = {
   totalFeeAmount: number
   vehicleId: string
   [key: string]: unknown
+}
+
+export type TripListItem = VehicleTrip & {
+  createdAt?: string
+  enteredAt?: string
+  vehicle?: {
+    vehicleId?: string
+    plateNumber?: string | null
+    truckNumber?: string | null
+    ownerName?: string | null
+    operatorName?: string | null
+    capacity?: number | null
+    capacityUnit?: string | null
+    registryStatus?: string | null
+    [key: string]: unknown
+  }
+  route?: {
+    routeId?: string | null
+    id?: string | null
+    code?: string | null
+    name?: string | null
+    selectionStatus?: string | null
+    [key: string]: unknown
+  }
+  payment?: {
+    paymentMode?: string
+    totalFeeAmount?: number
+    paidFeeAmount?: number
+    outstandingFeeAmount?: number
+    feeCount?: number
+    prn?: string | null
+    invoiceId?: string | null
+    latestFeeStatus?: string | null
+    fees?: Array<{
+      amount?: number
+      createdAt?: string
+      coverageStart?: string
+      coverageEnd?: string
+      durationDays?: number
+      exactMinutes?: number
+      [key: string]: unknown
+    }>
+    [key: string]: unknown
+  }
 }
 
 export type TripInvoice = {
@@ -106,6 +154,30 @@ export type SpecialPermitRouteRequest = {
 
 type Wrapped<T> = T | { data: T }
 
+type PublicPrepaidTripVehicleResponse =
+  | MotorVehicleLogbook
+  | {
+      vehicle?: PublicPrepaidTripVehicleResponse
+      logbook?: PublicPrepaidTripVehicleResponse
+      motorVehicle?: PublicPrepaidTripVehicleResponse
+      id?: string | null
+      vehicleId?: string | null
+      plate?: string | null
+      plateNumber?: string | null
+      plateNumberSnapshot?: string | null
+      numberPlate?: string | null
+      truckNumber?: string | null
+      truckNumberSnapshot?: string | null
+      capacity?: number | null
+      capacitySnapshot?: number | null
+      capacityUnit?: string | null
+      operatorName?: string | null
+      operatorNameSnapshot?: string | null
+      ownerName?: string | null
+      ownerNameSnapshot?: string | null
+      [key: string]: unknown
+    }
+
 function unwrap<T>(response: Wrapped<T>): T {
   if (
     response &&
@@ -118,10 +190,71 @@ function unwrap<T>(response: Wrapped<T>): T {
   return response as T
 }
 
-export function getTripsByVehicleId(vehicleId: string) {
-  return apiRequest<VehicleTrip[]>(
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  return null
+}
+
+function firstNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value
+  }
+  return null
+}
+
+function normalizePublicPrepaidTripVehicle(
+  response: PublicPrepaidTripVehicleResponse
+): MotorVehicleLogbook {
+  const container = response as Record<string, unknown>
+  const vehicle =
+    container.vehicle ?? container.logbook ?? container.motorVehicle ?? response
+  const source = vehicle as Record<string, unknown>
+
+  const plateNumber = firstString(
+    source.plateNumber,
+    source.plateNumberSnapshot,
+    source.plate,
+    source.numberPlate
+  )
+  const id = firstString(source.id, source.vehicleId)
+
+  return {
+    ...(source as Partial<MotorVehicleLogbook>),
+    id: id ?? "",
+    plateNumber: plateNumber ?? "",
+    truckNumber:
+      firstString(source.truckNumber, source.truckNumberSnapshot) ?? null,
+    operatorName:
+      firstString(source.operatorName, source.operatorNameSnapshot) ?? null,
+    ownerId: firstString(
+      source.ownerId,
+      source.ownerName,
+      source.ownerNameSnapshot
+    ),
+    grossWeightTotalKg: firstNumber(
+      source.grossWeightTotalKg,
+      source.logbookCapacityKg,
+      source.currentLogbookCapacity,
+      source.capacity,
+      source.capacitySnapshot
+    ),
+  } as MotorVehicleLogbook
+}
+
+export async function getTripsByVehicleId(vehicleId: string) {
+  const response = await apiRequest<Wrapped<VehicleTrip[]>>(
     `${CORE_API_BASE_URL}/trips?vehicleId=${encodeURIComponent(vehicleId)}`
   )
+  return unwrap(response)
+}
+
+export async function listTrips() {
+  const response = await apiRequest<Wrapped<TripListItem[]>>(
+    `${CORE_API_BASE_URL}/trips`
+  )
+  return unwrap(response)
 }
 
 export async function createTrip(payload: TripCreatePayload) {
@@ -147,6 +280,17 @@ export async function createPublicPrepaidTrip(payload: TripCreatePayload) {
     }
   )
   return unwrap(response)
+}
+
+export async function getPublicPrepaidTripVehicleByPlate(plate: string) {
+  const plateNumber = compactPlateNumber(plate)
+  const response = await apiRequest<Wrapped<PublicPrepaidTripVehicleResponse>>(
+    `${CORE_API_BASE_URL}/public/prepaid-trips/vehicles/by-plate/${encodeURIComponent(
+      plateNumber
+    )}`,
+    { skipAuth: true }
+  )
+  return normalizePublicPrepaidTripVehicle(unwrap(response))
 }
 
 export async function getTripDetail(tripId: string) {

@@ -297,12 +297,6 @@ export function permitStatusCounts(): Record<PermitStatus | "all", number> {
   return counts
 }
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-] as const
-
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : `${n}`
 }
@@ -319,16 +313,25 @@ export function formatPermitSchedule(p: Permit, now: Date = new Date()): string 
 
   if (p.status === "active") {
     const remainingMs = end.getTime() - now.getTime()
-    if (remainingMs <= 0) return "Ended just now"
+    if (remainingMs <= 0) return i18n.t("permits.endedJustNow")
     const totalMinutes = Math.floor(remainingMs / (1000 * 60))
     const h = Math.floor(totalMinutes / 60)
     const m = totalMinutes % 60
-    if (h === 0) return `Now · ends in ${m}m`
-    return `Now · ends in ${h}h ${pad2(m)}m`
+    if (h === 0) return i18n.t("permits.nowEndsMinutes", { minutes: m })
+    return i18n.t("permits.nowEndsHours", { hours: h, minutes: pad2(m) })
   }
 
-  const dow = WEEKDAYS[start.getDay()]
+  const dow = formatDateValue(start, { weekday: "short" })
   const day = start.getDate()
-  const month = MONTHS[start.getMonth()]
-  return `${dow} ${day} ${month} · ${formatTime(start)}–${formatTime(end)} (${durationHours}h)`
+  const month = formatDateValue(start, { month: "short" })
+  return i18n.t("permits.schedule", {
+    weekday: dow,
+    day,
+    month,
+    start: formatTime(start),
+    end: formatTime(end),
+    hours: durationHours,
+  })
 }
+import { i18n } from "@/i18n"
+import { formatDateValue } from "@/i18n/format"

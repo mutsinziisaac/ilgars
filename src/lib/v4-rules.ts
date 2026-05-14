@@ -3,6 +3,10 @@
 // FE-01..06 fee resolution, VL-01..11 application validation.
 
 import { WEIGHT_TIERS, weightTierForKg, type Vehicle } from "./fleet"
+import {
+  heavyVehicleThresholdKg,
+  isHeavyVehicleWeightKg,
+} from "./fleet-vehicle-classification"
 import type { Route, RouteCategory } from "./routes"
 
 export type VehicleClass = "RIGID" | "ARTICULATED"
@@ -12,26 +16,12 @@ export type WeightCategory = "OUT_OF_SCOPE" | "MEDIUM_HEAVY" | "RESTRICTED_HEAVY
 export type LicenceType = "STANDARD" | "NIGHT_RESTRICTED" | "PORT_EXEMPT" | "EXCEPTIONAL"
 
 // ── VC-01 ──────────────────────────────────────────────────────────────────
-const RIGID_2_AXLE_THRESHOLD = 16_001
-const RIGID_3PLUS_AXLE_THRESHOLD = 26_000
-const ARTICULATED_THRESHOLDS: Record<number, number> = {
-  3: 25_000,
-  4: 34_000,
-  5: 42_000,
-  6: 48_000,
-  7: 56_000,
-}
-
 export function vehicleClassFromConfiguration(configuration: string): VehicleClass {
   return /articulated/i.test(configuration) ? "ARTICULATED" : "RIGID"
 }
 
-export function thresholdFor(vehicleClass: VehicleClass, axles: number): number {
-  if (vehicleClass === "RIGID") {
-    return axles >= 3 ? RIGID_3PLUS_AXLE_THRESHOLD : RIGID_2_AXLE_THRESHOLD
-  }
-  if (axles >= 7) return ARTICULATED_THRESHOLDS[7]
-  return ARTICULATED_THRESHOLDS[axles] ?? ARTICULATED_THRESHOLDS[3]
+export function thresholdFor(_vehicleClass: VehicleClass, _axles: number): number {
+  return heavyVehicleThresholdKg()
 }
 
 export function classifyVehicle(input: {
@@ -40,7 +30,7 @@ export function classifyVehicle(input: {
   axles: number
 }): WeightCategory {
   if (!Number.isFinite(input.gvwKg) || input.gvwKg <= 8_000) return "OUT_OF_SCOPE"
-  return input.gvwKg >= thresholdFor(input.vehicleClass, input.axles)
+  return isHeavyVehicleWeightKg(input.gvwKg)
     ? "RESTRICTED_HEAVY"
     : "MEDIUM_HEAVY"
 }
@@ -87,7 +77,7 @@ export function evaluateAccess(input: {
       requiresEscort: false,
       feeExempt: true,
       decisionLine: "Out of scope (≤ 8,000 kg)",
-      rationale: "Vehicle GVW is below the heavy-vehicle threshold; no circulation licence required.",
+      rationale: "Vehicle GVW is below the RUC minimum; no circulation licence required.",
     }
   }
 
@@ -208,7 +198,7 @@ export function validateApplication(draft: ApplicationDraft): ValidationError[] 
   ) {
     errors.push({
       code: "VL-01",
-      message: "Vehicle GVW is below the threshold for restricted-night or exceptional licences.",
+      message: `Vehicle GVW is below the configured ${heavyVehicleThresholdKg().toLocaleString()} kg threshold for restricted-night or exceptional licences.`,
     })
   }
 
