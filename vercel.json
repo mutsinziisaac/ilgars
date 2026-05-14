@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/core/api/:path*",
+      "destination": "https://ilgars.ayinza.dev/core/api/:path*"
+    },
+    {
+      "source": "/motorvehicle/:path*",
+      "destination": "https://ilgars.ayinza.dev/motorvehicle/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

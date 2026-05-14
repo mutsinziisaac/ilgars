@@ -41,10 +41,11 @@ export function resolveApiBaseUrl(
   const normalizedFallback = fallbackPath.replace(/\/+$/, "")
   if (!trimmed) return normalizedFallback
 
-  if (/^https?:\/\//i.test(trimmed) && import.meta.env.DEV) {
+  if (/^https?:\/\//i.test(trimmed)) {
     try {
       const url = new URL(trimmed)
-      return `${url.pathname}${url.search}`.replace(/\/+$/, "")
+      const resolved = `${url.pathname}${url.search}`.replace(/\/+$/, "")
+      return resolved || normalizedFallback
     } catch {
       return normalizedFallback
     }
