@@ -35,7 +35,7 @@ import {
   plateExists,
   weightTierForKg,
 } from "@/lib/fleet"
-import { ApiError } from "@/lib/api"
+import { ApiError, getApiErrorMessage } from "@/lib/api"
 import {
   createFleetVehicle,
   type FleetVehicleRegistrationPayload,
@@ -225,8 +225,7 @@ export default function VehicleNew() {
     },
     onError: (error) => {
       toast.error(t("vehicleNew.registrationFailed"), {
-        description:
-          error instanceof Error ? error.message : t("vehicleNew.submitAgain"),
+        description: getApiErrorMessage(error, t("vehicleNew.submitAgain")),
       })
     },
   })
@@ -428,9 +427,7 @@ function LogbookStep({
 
       setNotFound(false)
       setLookupError(
-        error instanceof Error
-          ? error.message
-          : t("vehicleNew.lookupFailed")
+        getApiErrorMessage(error, t("vehicleNew.lookupFailed"))
       )
     },
   })

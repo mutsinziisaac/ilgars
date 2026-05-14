@@ -22,6 +22,7 @@ import {
   compactPlateNumber,
   type MotorVehicleLogbook,
 } from "@/lib/motor-vehicle-api"
+import { getApiErrorMessage } from "@/lib/api"
 import {
   createPublicPrepaidTrip,
   getPublicPrepaidTripVehicleByPlate,
@@ -224,8 +225,7 @@ export default function PublicTripLanding() {
       })
     } catch (error) {
       toast.error(t("landing.tripCreationFailed"), {
-        description:
-          error instanceof Error ? error.message : t("landing.tryAgain"),
+        description: getApiErrorMessage(error, t("landing.tryAgain")),
       })
     } finally {
       setIsCreating(false)

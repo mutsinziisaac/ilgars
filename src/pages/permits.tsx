@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { getApiErrorMessage } from "@/lib/api"
 import { formatMzn } from "@/lib/fleet"
 import {
   createRoadClosurePermit,
@@ -439,8 +440,7 @@ export default function Permits() {
     },
     onError: (error) => {
       toast.error(t("permits.roadClosure.submitFailed"), {
-        description:
-          error instanceof Error ? error.message : t("landing.tryAgain"),
+        description: getApiErrorMessage(error, t("landing.tryAgain")),
       })
     },
   })

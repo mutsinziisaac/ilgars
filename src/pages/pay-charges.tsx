@@ -30,6 +30,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { getApiErrorMessage } from "@/lib/api"
 import {
   MONTHLY_CAP_MZN,
   WALLET_BALANCE_MZN,
@@ -390,7 +391,7 @@ export default function PayCharges() {
       setStep("invoice")
     } catch (error) {
       toast.error(t("landing.tripCreationFailed"), {
-        description: error instanceof Error ? error.message : t("landing.tryAgain"),
+        description: getApiErrorMessage(error, t("landing.tryAgain")),
       })
       setStep(heavy ? "route" : "circulation")
     } finally {
@@ -429,7 +430,7 @@ export default function PayCharges() {
       setStep("submitted")
     } catch (error) {
       toast.error(t("payCharges.routeRequestFailed"), {
-        description: error instanceof Error ? error.message : t("landing.tryAgain"),
+        description: getApiErrorMessage(error, t("landing.tryAgain")),
       })
       setStep("route")
     } finally {
