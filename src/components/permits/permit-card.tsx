@@ -2,13 +2,11 @@ import { Button } from "@/components/ui/button"
 import { formatMzn } from "@/lib/fleet"
 import {
   formatPermitSchedule,
-  PERMIT_CATEGORY_LABELS,
-  PERMIT_STATUS_LABELS,
-  ROAD_CLASS_LABELS,
   type Permit,
   type PermitStatus,
 } from "@/lib/permits"
 import { cn } from "@/lib/utils"
+import { useTranslation } from "react-i18next"
 
 import { PermitMap } from "./permit-map"
 
@@ -21,6 +19,7 @@ const STATUS_PILL_CLASSES: Record<PermitStatus, string> = {
 }
 
 function StatusPill({ status }: { status: PermitStatus }) {
+  const { t } = useTranslation()
   return (
     <span
       className={cn(
@@ -33,24 +32,25 @@ function StatusPill({ status }: { status: PermitStatus }) {
           <span className="size-1.5 rounded-full bg-sidebar-foreground" />
         </span>
       )}
-      {PERMIT_STATUS_LABELS[status]}
+      {t(permitStatusKey(status))}
     </span>
   )
 }
 
 function PermitAction({ status }: { status: PermitStatus }) {
+  const { t } = useTranslation()
   if (status === "awaiting-payment") {
     return (
       <Button
         size="sm"
         className="h-9 rounded-full bg-sidebar px-5 text-sidebar-foreground hover:bg-sidebar/90"
       >
-        Pay now
+        {t("permits.payNow")}
       </Button>
     )
   }
 
-  const label = status === "completed" ? "View receipt" : "View details"
+  const label = status === "completed" ? t("common.viewReceipt") : t("common.viewDetails")
   return (
     <Button
       variant="outline"
@@ -63,9 +63,13 @@ function PermitAction({ status }: { status: PermitStatus }) {
 }
 
 export function PermitCard({ permit }: { permit: Permit }) {
+  const { t } = useTranslation()
   const isActive = permit.status === "active"
-  const title = `${PERMIT_CATEGORY_LABELS[permit.category]} · ${permit.road}`
-  const rateLabel = `${ROAD_CLASS_LABELS[permit.roadClass].toUpperCase()} · ${formatMzn(permit.hourlyRateMzn)} MZN/H`
+  const title = `${t(permitCategoryKey(permit.category))} · ${permit.road}`
+  const rateLabel = t("permits.rate", {
+    roadClass: t(roadClassKey(permit.roadClass)).toUpperCase(),
+    amount: formatMzn(permit.hourlyRateMzn),
+  })
 
   return (
     <article className="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card">
@@ -110,4 +114,16 @@ export function PermitCard({ permit }: { permit: Permit }) {
       </div>
     </article>
   )
+}
+
+function permitStatusKey(status: PermitStatus) {
+  return `permits.tabs.${status.replace("pending-review", "pendingReview").replace("awaiting-payment", "awaitingPayment")}`
+}
+
+function permitCategoryKey(category: Permit["category"]) {
+  return `permits.categories.${category.replace("sporting-event", "sportingEvent").replace("private-event", "privateEvent")}`
+}
+
+function roadClassKey(roadClass: Permit["roadClass"]) {
+  return `permits.roadClasses.${roadClass}`
 }

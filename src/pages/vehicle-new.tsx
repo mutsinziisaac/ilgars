@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -73,6 +74,20 @@ const PHOTO_SLOTS = [
   { key: "vin", label: "VIN plate" },
 ] as const
 type PhotoKey = (typeof PHOTO_SLOTS)[number]["key"]
+
+function vehicleNewStepLabelKey(key: StepKey) {
+  return `vehicleNew.steps.${key}`
+}
+
+function vehicleNewStepDescriptionKey(key: StepKey) {
+  return `vehicleNew.steps.${key}Description`
+}
+
+function photoSlotLabelKey(key: PhotoKey) {
+  if (key === "side-left") return "vehicleNew.photoSlots.sideLeft"
+  if (key === "side-right") return "vehicleNew.photoSlots.sideRight"
+  return `vehicleNew.photoSlots.${key}`
+}
 
 type UsageType = "cargo" | "agricultural" | "special"
 
@@ -157,6 +172,7 @@ function buildFleetVehiclePayload(
 }
 
 export default function VehicleNew() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -194,19 +210,23 @@ export default function VehicleNew() {
   const registerMutation = useMutation({
     mutationFn: createFleetVehicle,
     onSuccess: async (vehicle) => {
-      await queryClient.invalidateQueries({ queryKey: ["fleet-vehicles"] })
+      await queryClient.invalidateQueries({ queryKey: ["myfleet"] })
       toast.success(
-        `Vehicle ${vehicle.plateNumberSnapshot || form.plate} registered`,
+        t("vehicleNew.registeredToast", {
+          plate: vehicle.vehicle.plateNumber || form.plate,
+        }),
         {
-          description: `${vehicle.truckNumberSnapshot || "Fleet vehicle"} is now active in your fleet.`,
+          description: t("vehicleNew.registeredDescription", {
+            truck: vehicle.vehicle.truckNumber || t("vehicleNew.fleetVehicle"),
+          }),
         }
       )
       navigate(returnTo ?? "/portal/fleet")
     },
     onError: (error) => {
-      toast.error("Vehicle registration failed", {
+      toast.error(t("vehicleNew.registrationFailed"), {
         description:
-          error instanceof Error ? error.message : "Try submitting again.",
+          error instanceof Error ? error.message : t("vehicleNew.submitAgain"),
       })
     },
   })
@@ -214,9 +234,8 @@ export default function VehicleNew() {
   const handleSubmit = () => {
     const payload = buildFleetVehiclePayload(form, user.displayName)
     if (!payload) {
-      toast.error("MVR logbook required", {
-        description:
-          "Look up and select a Motor Vehicle Registry record before submitting.",
+      toast.error(t("vehicleNew.mvrRequired"), {
+        description: t("vehicleNew.mvrRequiredDescription"),
       })
       return
     }
@@ -228,7 +247,11 @@ export default function VehicleNew() {
     <div className="grid grid-cols-[220px_minmax(0,1fr)_320px] gap-8 pt-2 pb-20">
       <aside className="sticky top-20 self-start">
         <VerticalStepper
-          steps={STEPS}
+            steps={STEPS.map((item) => ({
+              ...item,
+              label: t(vehicleNewStepLabelKey(item.key)),
+              description: t(vehicleNewStepDescriptionKey(item.key)),
+            }))}
           currentKey={step}
           onJump={(k) => goTo(k)}
         />
@@ -358,6 +381,7 @@ function LogbookStep({
   setForm: React.Dispatch<React.SetStateAction<FormState>>
   onContinue: () => void
 }) {
+  const { t } = useTranslation()
   const [plateInput, setPlateInput] = useState(form.plate)
   const [notFound, setNotFound] = useState(false)
   const [duplicate, setDuplicate] = useState(false)
@@ -406,7 +430,7 @@ function LogbookStep({
       setLookupError(
         error instanceof Error
           ? error.message
-          : "Vehicle lookup failed. Try again."
+          : t("vehicleNew.lookupFailed")
       )
     },
   })
@@ -439,12 +463,12 @@ function LogbookStep({
   return (
     <Card>
       <SectionHeader
-        eyebrow="Logbook (MVR)"
-        description="Look up your vehicle in the Motor Vehicle Registry. Found records prefill chassis, engine, and class data."
+        eyebrow={t("vehicleNew.steps.logbook")}
+        description={t("vehicleNew.logbookDescription")}
       />
       <FieldGroup>
         <Field>
-          <FieldLabel htmlFor="plate-input">Number plate</FieldLabel>
+          <FieldLabel htmlFor="plate-input">{t("vehicleNew.numberPlate")}</FieldLabel>
           <InputGroup>
             <InputGroupInput
               id="plate-input"
@@ -468,18 +492,18 @@ function LogbookStep({
                 className="rounded-md"
               >
                 {loading ? <Spinner /> : <ShieldCheck />}
-                {loading ? "Looking up…" : "Look up via MVR"}
+                {loading ? t("vehicleNew.lookingUp") : t("vehicleNew.lookupViaMvr")}
               </Button>
             </InputGroupAddon>
           </InputGroup>
           <FieldDescription>
-            Enter the registered plate. We'll fetch the canonical record from
-            MVR; if it isn't there yet you can register manually.
+            {t("vehicleNew.plateHelp")}
           </FieldDescription>
           {duplicate && (
             <FieldError>
-              A vehicle with plate {normalisePlate(plateInput)} is already in
-              your fleet.
+              {t("vehicleNew.duplicatePlate", {
+                plate: normalisePlate(plateInput),
+              })}
             </FieldError>
           )}
           {lookupError && <FieldError>{lookupError}</FieldError>}
@@ -496,12 +520,12 @@ function LogbookStep({
           <div className="flex items-start justify-between gap-3 rounded-lg border border-secondary/40 bg-accent/60 p-4">
             <div>
               <p className="text-sm font-semibold text-foreground">
-                No MVR record found
+                {t("vehicleNew.noMvrRecord")}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                We couldn't match {normalisePlate(plateInput)} in MVR. You can
-                still register the vehicle manually — fields will be unlocked on
-                the next step.
+                {t("vehicleNew.noMvrRecordDescription", {
+                  plate: normalisePlate(plateInput),
+                })}
               </p>
             </div>
             <Button
@@ -510,7 +534,7 @@ function LogbookStep({
               onClick={startManual}
               className="rounded-md"
             >
-              Continue manually
+              {t("vehicleNew.continueManually")}
             </Button>
           </div>
         )}
@@ -539,6 +563,7 @@ function LogbookRecordPanel({
   record: MotorVehicleLogbook
   onContinue: () => void
 }) {
+  const { t } = useTranslation()
   const logbookRef = formatLogbookReference(record)
 
   return (
@@ -546,22 +571,26 @@ function LogbookRecordPanel({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-primary/15 bg-card px-4 py-3">
         <div>
           <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-            MVR logbook found
+            {t("vehicleNew.mvrLogbookFound")}
           </p>
           <h2 className="mt-1 font-mono text-lg font-semibold tracking-wider text-foreground">
             {record.plateNumber}
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {record.make} {record.model} · Logbook {logbookRef || "—"}
+            {t("vehicleNew.logbookWithRef", {
+              make: record.make,
+              model: record.model,
+              logbook: logbookRef || "—",
+            })}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
             <CheckCircle2 className="size-3.5" />
-            {record.status ?? "Verified"}
+            {record.status ?? t("vehicleNew.verified")}
           </span>
           <Button size="sm" onClick={onContinue} className="rounded-md">
-            Use logbook
+            {t("vehicleNew.useLogbook")}
             <ArrowRight />
           </Button>
         </div>
@@ -570,31 +599,31 @@ function LogbookRecordPanel({
       <div className="grid grid-cols-1 gap-0 divide-y divide-border/70 md:grid-cols-2 md:divide-x md:divide-y-0">
         <div className="p-4">
           <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-            Registration
+            {t("vehicleNew.registration")}
           </p>
           <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-            <SummaryRow label="Plate number" value={record.plateNumber} mono />
+            <SummaryRow label={t("vehicleNew.numberPlate")} value={record.plateNumber} mono />
             <SummaryRow
-              label="Truck number"
+              label={t("vehicleNew.truckNumber")}
               value={record.truckNumber ?? ""}
               mono
             />
             <SummaryRow
-              label="Series"
+              label={t("vehicleNew.series")}
               value={record.logbookSeries ?? ""}
               mono
             />
             <SummaryRow
-              label="Number"
+              label={t("vehicleNew.number")}
               value={record.logbookNumber ?? ""}
               mono
             />
             <SummaryRow
-              label="Department"
+              label={t("vehicleNew.department")}
               value={record.registrationDepartment ?? ""}
             />
             <SummaryRow
-              label="Registered"
+              label={t("common.registered")}
               value={record.registrationDate ?? ""}
             />
           </dl>
@@ -602,54 +631,54 @@ function LogbookRecordPanel({
 
         <div className="p-4">
           <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-            Vehicle identity
+            {t("vehicleNew.vehicleIdentity")}
           </p>
           <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-            <SummaryRow label="Make" value={record.make ?? ""} />
-            <SummaryRow label="Model" value={record.model ?? ""} />
-            <SummaryRow label="Colour" value={record.colour ?? ""} />
-            <SummaryRow label="Fuel" value={record.fuelType ?? ""} />
+            <SummaryRow label={t("vehicleNew.make")} value={record.make ?? ""} />
+            <SummaryRow label={t("vehicleNew.model")} value={record.model ?? ""} />
+            <SummaryRow label={t("common.colour")} value={record.colour ?? ""} />
+            <SummaryRow label={t("common.fuel")} value={record.fuelType ?? ""} />
             <SummaryRow
-              label="VIN / chassis"
+              label={t("payCharges.chassisVin")}
               value={record.vinOrChassis ?? ""}
               mono
             />
-            <SummaryRow label="Engine" value={record.engineNumber ?? ""} mono />
+            <SummaryRow label={t("common.engine")} value={record.engineNumber ?? ""} mono />
           </dl>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 border-t border-primary/15 bg-card/70 p-4 md:grid-cols-4">
         <LogbookMetric
-          label="Gross total"
+          label={t("vehicleNew.grossTotal")}
           value={formatKg(record.grossWeightTotalKg)}
         />
         <LogbookMetric
-          label="Logbook capacity"
+          label={t("vehicleNew.logbookCapacity")}
           value={formatKg(record.logbookCapacityKg)}
         />
-        <LogbookMetric label="Tare" value={formatKg(record.tareWeightKg)} />
+        <LogbookMetric label={t("vehicleNew.tare")} value={formatKg(record.tareWeightKg)} />
         <LogbookMetric
-          label="Current capacity"
+          label={t("vehicleNew.currentCapacity")}
           value={formatValue(record.currentLogbookCapacity)}
         />
       </div>
 
       <div className="grid grid-cols-1 gap-3 border-t border-primary/15 p-4 text-sm md:grid-cols-3">
-        <SummaryRow label="Operator" value={record.operatorName ?? ""} />
+        <SummaryRow label={t("common.operator")} value={record.operatorName ?? ""} />
         <SummaryRow
-          label="Operator ref"
+          label={t("vehicleNew.operatorRef")}
           value={record.operatorReference ?? ""}
           mono
         />
         <SummaryRow
-          label="Weighbridge ref"
+          label={t("vehicleNew.weighbridgeRef")}
           value={record.weighbridgeExternalRef ?? ""}
           mono
         />
-        <SummaryRow label="Service type" value={record.serviceType ?? ""} />
-        <SummaryRow label="Exemption" value={record.exemptionStatus ?? ""} />
-        <SummaryRow label="Tyres" value={record.tyreMeasurements ?? ""} />
+        <SummaryRow label={t("vehicleNew.serviceType")} value={record.serviceType ?? ""} />
+        <SummaryRow label={t("vehicleNew.exemption")} value={record.exemptionStatus ?? ""} />
+        <SummaryRow label={t("vehicleNew.tyres")} value={record.tyreMeasurements ?? ""} />
       </div>
     </div>
   )
@@ -680,6 +709,7 @@ function PhotosStep({
   onBack: () => void
   onContinue: () => void
 }) {
+  const { t } = useTranslation()
   const handleFile = (key: PhotoKey, file: File | null) => {
     setForm((f) => {
       const photos = { ...f.photos }
@@ -690,12 +720,12 @@ function PhotosStep({
         return { ...f, photos, photoErrors }
       }
       if (file.size > PHOTO_MAX_BYTES) {
-        photoErrors[key] = "File too large — max 5 MB per photo (BR-002-03)."
+        photoErrors[key] = t("vehicleNew.fileTooLarge")
         delete photos[key]
         return { ...f, photos, photoErrors }
       }
       if (!["image/jpeg", "image/png"].includes(file.type)) {
-        photoErrors[key] = "Use JPEG or PNG (BR-002-03)."
+        photoErrors[key] = t("vehicleNew.invalidPhotoType")
         delete photos[key]
         return { ...f, photos, photoErrors }
       }
@@ -710,11 +740,11 @@ function PhotosStep({
     <>
       <Card>
         <SectionHeader
-          eyebrow="Vehicle photos"
-          description="Upload 6 angles. JPEG or PNG, up to 5 MB each (BR-002-03)."
+          eyebrow={t("vehicleNew.vehiclePhotos")}
+          description={t("vehicleNew.vehiclePhotosDescription")}
           trailing={
             <span className="text-[11px] text-muted-foreground tabular-nums">
-              {uploadedCount} of 6 uploaded
+              {t("vehicleNew.uploadedCount", { count: uploadedCount })}
             </span>
           }
         />
@@ -722,7 +752,7 @@ function PhotosStep({
           {PHOTO_SLOTS.map((slot) => (
             <PhotoTile
               key={slot.key}
-              label={slot.label}
+              label={t(photoSlotLabelKey(slot.key))}
               file={form.photos[slot.key]}
               error={form.photoErrors[slot.key]}
               onFile={(f) => handleFile(slot.key, f)}
@@ -731,8 +761,8 @@ function PhotosStep({
         </div>
       </Card>
       <Footer
-        backLabel="Back to logbook"
-        continueLabel="Continue to review"
+        backLabel={t("vehicleNew.backToLogbook")}
+        continueLabel={t("vehicleNew.continueReview")}
         onBack={onBack}
         onContinue={onContinue}
       />
@@ -751,6 +781,7 @@ function PhotoTile({
   error?: string
   onFile: (file: File | null) => void
 }) {
+  const { t } = useTranslation()
   const previewUrl = useMemo(
     () => (file ? URL.createObjectURL(file) : null),
     [file]
@@ -784,10 +815,10 @@ function PhotoTile({
           <>
             <UploadCloud className="size-5 text-muted-foreground group-hover:text-primary" />
             <span className="text-[11px] text-muted-foreground">
-              Click to upload
+              {t("vehicleNew.clickUpload")}
             </span>
             <span className="text-[10px] text-muted-foreground/70">
-              JPEG/PNG · ≤ 5 MB
+              {t("vehicleNew.fileHint")}
             </span>
           </>
         )}
@@ -805,7 +836,7 @@ function PhotoTile({
           className="inline-flex items-center gap-1 self-start text-[11px] font-medium text-muted-foreground hover:text-destructive"
         >
           <X className="size-3" />
-          Remove {file.name}
+          {t("vehicleNew.removeFile", { name: file.name })}
         </button>
       )}
       {error && <FieldError>{error}</FieldError>}
@@ -825,6 +856,7 @@ function ReviewStep({
   onSubmit: () => void
   isSubmitting: boolean
 }) {
+  const { t } = useTranslation()
   const tier = weightTierForKg(form.weightKg)
   const canSubmit = !!form.logbookRecord?.id && !isSubmitting
 
@@ -832,48 +864,48 @@ function ReviewStep({
     <>
       <Card>
         <SectionHeader
-          eyebrow="Vehicle identity"
+          eyebrow={t("vehicleNew.vehicleIdentity")}
           trailing={
             form.mvrLocked && (
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wide text-primary uppercase">
-                MVR ✓
+                {t("vehicleNew.mvrShort")}
               </span>
             )
           }
         />
         <dl className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-          <SummaryRow label="Number plate" value={form.plate} mono />
-          <SummaryRow label="Logbook ref" value={form.logbookRef} mono />
-          <SummaryRow label="Make & model" value={form.makeModel} />
-          <SummaryRow label="Year" value={form.year} />
-          <SummaryRow label="Chassis (VIN)" value={form.chassisVin} mono />
-          <SummaryRow label="Engine" value={form.engineNumber} mono />
+          <SummaryRow label={t("vehicleNew.numberPlate")} value={form.plate} mono />
+          <SummaryRow label={t("vehicleNew.logbookRef")} value={form.logbookRef} mono />
+          <SummaryRow label={t("vehicleNew.makeModel")} value={form.makeModel} />
+          <SummaryRow label={t("vehicleNew.year")} value={form.year} />
+          <SummaryRow label={t("vehicleNew.chassis")} value={form.chassisVin} mono />
+          <SummaryRow label={t("common.engine")} value={form.engineNumber} mono />
         </dl>
       </Card>
 
       <Card>
-        <SectionHeader eyebrow="RUC classification" />
+        <SectionHeader eyebrow={t("vehicleNew.rucClassification")} />
         <dl className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-          <SummaryRow label="Axles" value={`${form.axles}`} />
+          <SummaryRow label={t("vehicleNew.axles")} value={`${form.axles}`} />
           <SummaryRow
-            label="Gross weight"
+            label={t("vehicleNew.grossWeight")}
             value={`${formatMzn(form.weightKg)} kg`}
           />
           <SummaryRow
-            label="Tariff bracket"
+            label={t("vehicleNew.tariffBracket")}
             value={
               tier
                 ? `${tier.rangeLabel} · ${formatMzn(tier.mznPerDay)} MZN/day`
-                : "Below RUC threshold"
+                : t("vehicleNew.belowThreshold")
             }
           />
           <SummaryRow
-            label="Usage"
+            label={t("vehicleNew.usage")}
             value={
               {
-                cargo: "Cargo truck (standard freight)",
-                agricultural: "Agricultural transit",
-                special: "Special permit (case-by-case)",
+                cargo: t("vehicleNew.usages.cargo"),
+                agricultural: t("vehicleNew.usages.agricultural"),
+                special: t("vehicleNew.usages.special"),
               }[form.usageType]
             }
           />
@@ -882,10 +914,10 @@ function ReviewStep({
 
       <Card>
         <SectionHeader
-          eyebrow="Photos"
+          eyebrow={t("vehicleNew.steps.photos")}
           trailing={
             <span className="text-[11px] text-muted-foreground tabular-nums">
-              {Object.keys(form.photos).length} of 6 uploaded
+              {t("vehicleNew.uploadedCount", { count: Object.keys(form.photos).length })}
             </span>
           }
         />
@@ -902,7 +934,7 @@ function ReviewStep({
                     : "border-border bg-muted/30 text-muted-foreground"
                 )}
               >
-                <span>{slot.label}</span>
+                <span>{t(photoSlotLabelKey(slot.key))}</span>
                 {hasFile ? (
                   <CheckCircle2 className="size-3.5 text-primary" />
                 ) : (
@@ -923,7 +955,7 @@ function ReviewStep({
           className="rounded-lg"
         >
           <ArrowLeft />
-          Back to photos
+          {t("vehicleNew.backToPhotos")}
         </Button>
         <Button
           size="lg"
@@ -932,7 +964,7 @@ function ReviewStep({
           className="rounded-lg bg-primary"
         >
           {isSubmitting ? <Spinner /> : <CheckCircle2 />}
-          {isSubmitting ? "Registering…" : "Register vehicle"}
+          {isSubmitting ? t("vehicleNew.registering") : t("vehicleNew.registerVehicle")}
         </Button>
       </div>
     </>
@@ -968,11 +1000,12 @@ function SummaryRow({
 
 // ── Right rail ──────────────────────────────────────────────────────────────
 function LivePreview({ form }: { form: FormState }) {
+  const { t } = useTranslation()
   const tier = weightTierForKg(form.weightKg)
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-        Live preview
+        {t("vehicleNew.livePreview")}
       </p>
       <div className="mt-3 overflow-hidden rounded-lg">
         <VehicleIllustration
@@ -986,14 +1019,14 @@ function LivePreview({ form }: { form: FormState }) {
         {form.plate || "— — — — — —"}
       </p>
       <p className="mt-0.5 text-xs text-muted-foreground">
-        {[form.makeModel || "Vehicle", form.year, `${form.axles || "—"} axles`]
+        {[form.makeModel || t("vehicleNew.vehicle"), form.year, t("vehicleNew.axlesCount", { count: form.axles || "—" })]
           .filter(Boolean)
           .join(" · ")}
       </p>
 
       <div className="mt-4 rounded-lg bg-muted/40 p-3">
         <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-          Estimated daily charge
+          {t("vehicleNew.estimatedDailyCharge")}
         </p>
         {tier ? (
           <p className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
@@ -1004,12 +1037,12 @@ function LivePreview({ form }: { form: FormState }) {
           </p>
         ) : (
           <p className="mt-1 text-sm text-muted-foreground">
-            Enter a weight ≥ 8,000 kg.
+            {t("vehicleNew.enterWeight")}
           </p>
         )}
         {tier && (
           <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-            Class {tier.label} · capped at 20,000 MZN/month per UC-004 BR-A3.
+            {t("vehicleNew.classCapped", { tier: tier.label })}
           </p>
         )}
       </div>
@@ -1018,16 +1051,16 @@ function LivePreview({ form }: { form: FormState }) {
 }
 
 function SourceVerifiedNote() {
+  const { t } = useTranslation()
   return (
     <div className="flex items-start gap-3 rounded-xl border border-secondary/40 bg-accent/60 p-4">
       <ShieldCheck className="mt-0.5 size-4 shrink-0 text-secondary" />
       <div>
         <p className="text-sm font-semibold text-foreground">
-          Your data is verified at source
+          {t("vehicleNew.sourceVerified")}
         </p>
         <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-          Plate, VIN and engine number are pulled from MVR and locked. To change
-          them, update your logbook with MVR first.
+          {t("vehicleNew.sourceVerifiedDescription")}
         </p>
       </div>
     </div>

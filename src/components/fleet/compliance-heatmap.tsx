@@ -1,4 +1,5 @@
 import { useMemo } from "react"
+import { useTranslation } from "react-i18next"
 
 import { cn } from "@/lib/utils"
 import type { ComplianceCellState } from "@/lib/fleet"
@@ -13,12 +14,6 @@ const STATE_FILL: Record<ComplianceCellState, string> = {
   paid: "fill-primary",
   idle: "fill-muted",
   alert: "fill-secondary",
-}
-
-const STATE_LABEL: Record<ComplianceCellState, string> = {
-  paid: "Paid",
-  idle: "Idle",
-  alert: "Alert",
 }
 
 const MONTH_LABELS = [
@@ -44,6 +39,7 @@ export function ComplianceHeatmap({
   series: ComplianceCellState[]
   className?: string
 }) {
+  const { t } = useTranslation()
   const counts = useMemo(() => {
     const c = { paid: 0, idle: 0, alert: 0 }
     for (const s of series) c[s] += 1
@@ -75,16 +71,16 @@ export function ComplianceHeatmap({
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <div>
           <h3 className="text-sm font-semibold tracking-tight text-foreground">
-            Compliance · last 12 months
+            {t("compliance.title")}
           </h3>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Each cell is one day · green = paid · grey = idle · orange = alert
+            {t("compliance.description")}
           </p>
         </div>
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-          <Legend swatch="bg-primary" label={`${counts.paid} paid`} />
-          <Legend swatch="bg-secondary" label={`${counts.alert} alerts`} />
-          <Legend swatch="bg-muted" label={`${counts.idle} idle`} />
+          <Legend swatch="bg-primary" label={t("compliance.paidCount", { count: counts.paid })} />
+          <Legend swatch="bg-secondary" label={t("compliance.alertCount", { count: counts.alert })} />
+          <Legend swatch="bg-muted" label={t("compliance.idleCount", { count: counts.idle })} />
         </div>
       </div>
 
@@ -92,7 +88,7 @@ export function ComplianceHeatmap({
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="h-44 w-full"
-          aria-label="Daily compliance for the last 12 months"
+          aria-label={t("compliance.aria")}
         >
           {cells.map((cell) => (
             <Tooltip key={cell.idx}>
@@ -107,7 +103,10 @@ export function ComplianceHeatmap({
                 />
               </TooltipTrigger>
               <TooltipContent side="top" className="text-xs">
-                Day {cell.idx + 1} · {STATE_LABEL[cell.state]}
+                {t("compliance.dayState", {
+                  day: cell.idx + 1,
+                  state: t(`compliance.${cell.state}`),
+                })}
               </TooltipContent>
             </Tooltip>
           ))}

@@ -560,7 +560,12 @@ export function tierMidpoint(tier: WeightTier): number {
 }
 
 export function formatMzn(n: number): string {
-  return n.toLocaleString("en-US")
+  const locale =
+    typeof window !== "undefined" &&
+    window.localStorage.getItem("ilgars-language") === "pt-MZ"
+      ? "pt-MZ"
+      : "en-US"
+  return n.toLocaleString(locale)
 }
 
 export function normalisePlate(s: string): string {

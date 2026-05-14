@@ -1,8 +1,27 @@
 import type { FleetVehicle } from "@/lib/fleet-vehicles-api"
 
-const HEAVY_VEHICLE_TONNES_THRESHOLD = 8
+const DEFAULT_HEAVY_VEHICLE_TONNES_THRESHOLD = 20
 
 export type CapacityVehicleClass = "MEDIUM_VEHICLE" | "HEAVY_VEHICLE"
+
+export function heavyVehicleThresholdTonnes(): number {
+  const value = Number(import.meta.env.VITE_THRESHOLD)
+  return Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_HEAVY_VEHICLE_TONNES_THRESHOLD
+}
+
+export function heavyVehicleThresholdKg(): number {
+  return heavyVehicleThresholdTonnes() * 1000
+}
+
+export function isHeavyVehicleCapacityTonnes(value: number): boolean {
+  return Number.isFinite(value) && value > heavyVehicleThresholdTonnes()
+}
+
+export function isHeavyVehicleWeightKg(value: number): boolean {
+  return Number.isFinite(value) && value > heavyVehicleThresholdKg()
+}
 
 export function capacityTonnes(vehicle: FleetVehicle): number {
   const value = Number(vehicle.capacitySnapshot)
@@ -13,7 +32,7 @@ export function capacityTonnes(vehicle: FleetVehicle): number {
 export function classifyFleetVehicleCapacity(
   vehicle: FleetVehicle
 ): CapacityVehicleClass {
-  return capacityTonnes(vehicle) > HEAVY_VEHICLE_TONNES_THRESHOLD
+  return isHeavyVehicleCapacityTonnes(capacityTonnes(vehicle))
     ? "HEAVY_VEHICLE"
     : "MEDIUM_VEHICLE"
 }

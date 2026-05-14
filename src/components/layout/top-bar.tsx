@@ -1,5 +1,5 @@
-import { format } from "date-fns"
 import { ArrowLeft, Bell, Plus, Search } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import {
   Link,
   matchPath,
@@ -11,9 +11,10 @@ import {
 import { useAuth } from "@/components/auth/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { formatDate } from "@/i18n/format"
 import { findNavItem } from "./nav-config"
 
-const MOCK_TRIP_COUNT = 12
+const MOCK_TRUCK_COUNT = 12
 const MOCK_COMPANY_COUNT = 1
 const MOCK_CHEST_ID = "100184"
 
@@ -43,14 +44,15 @@ export function TopBar() {
 }
 
 function PermitsTopBar() {
+  const { t } = useTranslation()
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
       <div className="flex min-w-0 flex-col leading-tight">
         <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-          Road closure & restriction applications
+          {t("shell.permitsEyebrow")}
         </p>
         <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-foreground">
-          My permits
+          {t("shell.myPermits")}
         </h1>
       </div>
       <div className="flex shrink-0 items-center gap-2">
@@ -58,7 +60,7 @@ function PermitsTopBar() {
           <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search plates, receipts…"
+            placeholder={t("common.searchPlatesReceipts")}
             className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
           />
         </div>
@@ -68,7 +70,7 @@ function PermitsTopBar() {
           className="rounded-lg bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
         >
           <Plus />
-          New application
+          {t("shell.newApplication")}
         </Button>
       </div>
     </header>
@@ -76,12 +78,13 @@ function PermitsTopBar() {
 }
 
 function DefaultTopBar() {
+  const { t } = useTranslation()
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const { user } = useAuth()
   const isFleet = pathname === "/portal/fleet"
   const current = findNavItem(pathname)
-  const today = format(new Date(), "EEE d MMM yyyy")
+  const today = formatDate(new Date(), "EEE d MMM yyyy")
   const displayName = user.firstName ?? user.displayName
 
   return (
@@ -90,20 +93,26 @@ function DefaultTopBar() {
         {isFleet ? (
           <>
             <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              {MOCK_TRIP_COUNT} trips · {MOCK_COMPANY_COUNT} company · Chest ID{" "}
-              {MOCK_CHEST_ID}
+              {t("shell.fleetMeta", {
+                trucks: MOCK_TRUCK_COUNT,
+                companies: MOCK_COMPANY_COUNT,
+                chestId: MOCK_CHEST_ID,
+              })}
             </p>
             <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-foreground">
-              My trips
+              {t("nav.myFleet")}
             </h1>
           </>
         ) : (
           <>
             <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              {current?.label ?? "Page"} · {today}
+              {t("shell.portalMeta", {
+                page: current ? t(current.labelKey) : t("shell.page"),
+                date: today,
+              })}
             </p>
             <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-foreground">
-              Boa tarde, {displayName}
+              {t("shell.greeting", { name: displayName })}
             </h1>
           </>
         )}
@@ -115,7 +124,7 @@ function DefaultTopBar() {
             <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
-              placeholder="Search plates, receipts…"
+              placeholder={t("common.searchPlatesReceipts")}
               className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
             />
           </div>
@@ -124,11 +133,11 @@ function DefaultTopBar() {
         {isFleet ? (
           <Button
             size="sm"
-            onClick={() => navigate("/portal/pay-charges?step=vehicle")}
+            onClick={() => navigate("/portal/fleet/new")}
             className="rounded-lg bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
           >
             <Plus />
-            New trip
+            {t("fleet.addTruck")}
           </Button>
         ) : (
           <Button
@@ -137,7 +146,7 @@ function DefaultTopBar() {
             className="rounded-lg bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
           >
             <Plus />
-            New trip
+            {t("shell.newTrip")}
           </Button>
         )}
       </div>
@@ -146,6 +155,7 @@ function DefaultTopBar() {
 }
 
 function CreateTopBar() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const stepKey = (params.get("step") ??
@@ -155,10 +165,13 @@ function CreateTopBar() {
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
       <div className="flex min-w-0 flex-col leading-tight">
         <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-          Vehicle register · UC-002 · Step {stepIndex + 1} of {FLEET_STEP_TOTAL}
+          {t("shell.vehicleRegisterStep", {
+            current: stepIndex + 1,
+            total: FLEET_STEP_TOTAL,
+          })}
         </p>
         <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-foreground">
-          Register a new vehicle
+          {t("shell.registerNewVehicle")}
         </h1>
       </div>
       <div className="flex shrink-0 items-center gap-2">
@@ -166,7 +179,7 @@ function CreateTopBar() {
           <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search plates, receipts…"
+            placeholder={t("common.searchPlatesReceipts")}
             className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
           />
         </div>
@@ -177,7 +190,7 @@ function CreateTopBar() {
           onClick={() => navigate("/portal/fleet")}
           className="rounded-lg"
         >
-          Save & exit
+          {t("common.saveExit")}
         </Button>
       </div>
     </header>
@@ -185,6 +198,7 @@ function CreateTopBar() {
 }
 
 function PayChargesTopBar() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const stepKey = (params.get("step") ??
@@ -194,10 +208,13 @@ function PayChargesTopBar() {
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
       <div className="flex min-w-0 flex-col leading-tight">
         <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-          New trip · Step {stepIndex + 1} of {PAY_STEP_TOTAL}
+          {t("shell.newTripStep", {
+            current: stepIndex + 1,
+            total: PAY_STEP_TOTAL,
+          })}
         </p>
         <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight text-foreground">
-          Create trip
+          {t("shell.createTrip")}
         </h1>
       </div>
       <div className="flex shrink-0 items-center gap-2">
@@ -205,7 +222,7 @@ function PayChargesTopBar() {
           <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search plates, receipts…"
+            placeholder={t("common.searchPlatesReceipts")}
             className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
           />
         </div>
@@ -216,7 +233,7 @@ function PayChargesTopBar() {
           onClick={() => navigate("/portal")}
           className="rounded-lg"
         >
-          Save & exit
+          {t("common.saveExit")}
         </Button>
       </div>
     </header>
@@ -224,13 +241,14 @@ function PayChargesTopBar() {
 }
 
 function DetailTopBar({ vehicleId }: { vehicleId: string }) {
-  const eyebrow = "My trips · Vehicle"
+  const { t } = useTranslation()
+  const eyebrow = t("shell.detailEyebrow")
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
       <div className="flex min-w-0 items-center gap-3">
         <Link
           to="/portal/fleet"
-          aria-label="Back to fleet"
+          aria-label={t("shell.backToFleet")}
           className="flex size-8 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <ArrowLeft className="size-4" />
@@ -250,7 +268,7 @@ function DetailTopBar({ vehicleId }: { vehicleId: string }) {
           <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search plates, receipts…"
+            placeholder={t("common.searchPlatesReceipts")}
             className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
           />
         </div>
@@ -261,12 +279,13 @@ function DetailTopBar({ vehicleId }: { vehicleId: string }) {
 }
 
 function NotificationsButton() {
+  const { t } = useTranslation()
   return (
     <Button
       variant="outline"
       size="icon-sm"
       className="relative rounded-lg"
-      aria-label="Notifications"
+      aria-label={t("shell.notifications")}
     >
       <Bell className="size-3.5" />
       <span

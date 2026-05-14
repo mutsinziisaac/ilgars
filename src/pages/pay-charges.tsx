@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { addDays, differenceInCalendarDays, format, startOfDay } from "date-fns"
+import { addDays, differenceInCalendarDays, startOfDay } from "date-fns"
 import {
   AlertTriangle,
   ArrowLeft,
@@ -18,6 +18,9 @@ import {
 import type { DateRange } from "react-day-picker"
 import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
+import type { TFunction } from "i18next"
+import { useLocation, useSearchParams } from "react-router-dom"
 
 import { useAuth } from "@/components/auth/auth-context"
 import { StatusPill } from "@/components/fleet/status-pill"
@@ -54,8 +57,11 @@ import {
   type TripCreateResult,
   type TripInvoice,
 } from "@/lib/trips-api"
+import type { MyFleetItem } from "@/lib/fleet-vehicles-api"
+import { isHeavyVehicleWeightKg } from "@/lib/fleet-vehicle-classification"
 import { classifyFleetVehicle, type WeightCategory } from "@/lib/v4-rules"
 import { cn } from "@/lib/utils"
+import { formatDate } from "@/i18n/format"
 
 type StepKey =
   | "vehicle"
@@ -98,6 +104,10 @@ const INITIAL_STATE: FormState = {
   routeRequest: null,
   channel: "mobile",
   paymentResult: null,
+}
+
+type PayChargesLocationState = {
+  fleetVehicle?: MyFleetItem
 }
 
 const BASE_STEPS: readonly Step<StepKey>[] = [
@@ -191,7 +201,7 @@ function motorVehicleToVehicle(record: MotorVehicleLogbook): Vehicle {
     configuration: weightKg >= 25_000 ? "4x2 articulated" : "Rigid",
     weightKg,
     color: record.colour ?? "Not recorded",
-    rucClass: weightKg > 16_000 ? "Heavy vehicle" : "Medium vehicle",
+    rucClass: isHeavyVehicleWeightKg(weightKg) ? "Heavy vehicle" : "Medium vehicle",
     chassisVin: record.vinOrChassis ?? record.id,
     engineNumber: record.engineNumber ?? "Not recorded",
     logbookRef: record.logbookNumber ?? record.logbookSeries ?? "MVR mock",
@@ -208,6 +218,53 @@ function motorVehicleToVehicle(record: MotorVehicleLogbook): Vehicle {
     documents: [],
     complianceSeries: [],
     trackingDevice: null,
+  }
+}
+
+function myFleetItemToMotorVehicle(item: MyFleetItem): MotorVehicleLogbook {
+  const vehicle = item.vehicle
+  return {
+    colour: null,
+    currentLogbookCapacity: vehicle.capacity ?? null,
+    engineCapacityCc: null,
+    engineCylinders: null,
+    engineNumber: null,
+    exemptionStatus: null,
+    fuelType: null,
+    gearboxDescription: null,
+    gearboxType: null,
+    grossWeightFrontKg: null,
+    grossWeightMiddleKg: null,
+    grossWeightRearKg: null,
+    grossWeightTotalKg: null,
+    id: vehicle.vehicleId || item.vehicleId,
+    logbookCapacityKg: null,
+    logbookNumber: null,
+    logbookSeries: null,
+    make: null,
+    model: null,
+    operatorName: vehicle.operatorName,
+    operatorReference: null,
+    ownerId: vehicle.ownerName,
+    plateNumber: vehicle.plateNumber,
+    registrationDate: null,
+    registrationDepartment: null,
+    serviceType: null,
+    status: vehicle.registryStatus,
+    tareWeightKg: null,
+    truckNumber: vehicle.truckNumber,
+    tyreMeasurements: null,
+    vinOrChassis: vehicle.vehicleId || item.vehicleId,
+    weighbridgeExternalRef: null,
+  }
+}
+
+function initialStateForFleetItem(item: MyFleetItem): FormState {
+  const sourceVehicle = myFleetItemToMotorVehicle(item)
+  return {
+    ...INITIAL_STATE,
+    sourceVehicle,
+    vehicle: motorVehicleToVehicle(sourceVehicle),
   }
 }
 
@@ -249,36 +306,65 @@ function invoicePrn(invoice: TripInvoice | null) {
     : "PRN-STUB-PENDING"
 }
 
-function paymentChannelLabel(channel: PaymentChannel) {
-  return PAYMENT_CHANNELS.find((c) => c.key === channel)?.title ?? channel
+function paymentChannelLabel(channel: PaymentChannel, t: TFunction) {
+  if (channel === "mobile") return t("payCharges.channels.mobileMoney")
+  if (channel === "card") return t("payCharges.channels.card")
+  if (channel === "wallet") return t("payCharges.channels.wallet")
+  return channel
+}
+
+function stepLabelKey(key: StepKey) {
+  return `payCharges.steps.${key}`
+}
+
+function stepDescriptionKey(key: StepKey, heavy: boolean) {
+  if (key === "circulation" && heavy) {
+    return "payCharges.steps.circulationCalendarDescription"
+  }
+  return `payCharges.steps.${key}Description`
 }
 
 export default function PayCharges() {
+  const { t } = useTranslation()
   const { user } = useAuth()
-  const [form, setForm] = useState<FormState>(INITIAL_STATE)
-  const [step, setStep] = useState<StepKey>("vehicle")
+  const location = useLocation()
+  const [params] = useSearchParams()
+  const stateFleetVehicle = (location.state as PayChargesLocationState | null)
+    ?.fleetVehicle
+  const initialState = stateFleetVehicle
+    ? initialStateForFleetItem(stateFleetVehicle)
+    : INITIAL_STATE
+  const initialStep = (params.get("step") ?? "vehicle") as StepKey
+  const [form, setForm] = useState<FormState>(() => initialState)
+  const [step, setStep] = useState<StepKey>(() =>
+    initialState.vehicle && initialStep !== "vehicle" ? initialStep : "vehicle"
+  )
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const weightCategory = form.vehicle
     ? classifyFleetVehicle(form.vehicle)
     : null
   const heavy = isHeavy(weightCategory)
-  const steps = heavy ? HEAVY_STEPS : BASE_STEPS
+  const steps = (heavy ? HEAVY_STEPS : BASE_STEPS).map((item) => ({
+    ...item,
+    label: t(stepLabelKey(item.key)),
+    description: t(stepDescriptionKey(item.key, heavy)),
+  }))
   const activeInvoice = form.tripResult?.invoice ?? null
   const estimatedTotal = estimateTotal(form)
   const payableTotal = invoiceAmount(activeInvoice, estimatedTotal)
 
   const goTo = (next: StepKey) => setStep(next)
   const reset = () => {
-    setForm(INITIAL_STATE)
+    setForm(initialState)
     setStep("vehicle")
   }
 
   const createTripAndInvoice = async (routeId?: string | null) => {
     if (!form.vehicle) return
     if (!MUNICIPALITY_ID) {
-      toast.error("Municipality ID missing", {
-        description: "Set VITE_MUNICIPALITY_ID before creating trips.",
+      toast.error(t("landing.municipalityMissing"), {
+        description: t("payCharges.creatingTripsMissingMunicipality"),
       })
       return
     }
@@ -296,13 +382,15 @@ export default function PayCharges() {
         ...(routeId ? { routeId } : {}),
       })
       setForm((current) => ({ ...current, tripResult: result }))
-      toast.success("Trip declared", {
-        description: `${form.vehicle.plate} has an invoice and PRN ready.`,
+      toast.success(t("landing.tripDeclared"), {
+        description: t("payCharges.tripDeclaredDescription", {
+          plate: form.vehicle.plate,
+        }),
       })
       setStep("invoice")
     } catch (error) {
-      toast.error("Trip creation failed", {
-        description: error instanceof Error ? error.message : "Try again.",
+      toast.error(t("landing.tripCreationFailed"), {
+        description: error instanceof Error ? error.message : t("landing.tryAgain"),
       })
       setStep(heavy ? "route" : "circulation")
     } finally {
@@ -313,8 +401,8 @@ export default function PayCharges() {
   const submitUnknownRoute = async () => {
     if (!form.vehicle) return
     if (!MUNICIPALITY_ID) {
-      toast.error("Municipality ID missing", {
-        description: "Set VITE_MUNICIPALITY_ID before creating route requests.",
+      toast.error(t("landing.municipalityMissing"), {
+        description: t("payCharges.routeMissingMunicipality"),
       })
       return
     }
@@ -335,13 +423,13 @@ export default function PayCharges() {
         notes: "Known route was not available in the list",
       })
       setForm((current) => ({ ...current, routeRequest: request }))
-      toast.success("Route request submitted", {
-        description: "Security review is pending. No invoice is created yet.",
+      toast.success(t("payCharges.routeRequestSubmittedToast"), {
+        description: t("payCharges.routePendingDescription"),
       })
       setStep("submitted")
     } catch (error) {
-      toast.error("Route request failed", {
-        description: error instanceof Error ? error.message : "Try again.",
+      toast.error(t("payCharges.routeRequestFailed"), {
+        description: error instanceof Error ? error.message : t("landing.tryAgain"),
       })
       setStep("route")
     } finally {
@@ -355,8 +443,8 @@ export default function PayCharges() {
       vehicle: form.vehicle,
       category:
         form.chargeKind === "special"
-          ? "Special circulation licence"
-          : `Daily circulation · ${weightTierForKg(form.vehicle.weightKg)?.label ?? "standard"}`,
+          ? t("payCharges.specialLicence")
+          : `${t("payCharges.dailyCirculation")} · ${weightTierForKg(form.vehicle.weightKg)?.label ?? "standard"}`,
       durationDays: form.chargeKind === "special" ? 30 : form.durationDays,
       rangeFromIso: (form.range.from ?? today0).toISOString(),
       rangeToIso: (form.range.to ?? form.range.from ?? today0).toISOString(),
@@ -365,7 +453,7 @@ export default function PayCharges() {
       capAdjustmentMzn: Math.max(0, estimatedTotal - payableTotal),
       totalMzn: payableTotal,
       channel: form.channel,
-      channelLabel: paymentChannelLabel(form.channel),
+      channelLabel: paymentChannelLabel(form.channel, t),
       status: "paid",
     })
     setForm((current) => ({
@@ -454,8 +542,8 @@ export default function PayCharges() {
           <ProcessingStep
             label={
               isSubmitting && heavy && !form.routeId
-                ? "Submitting route request..."
-                : "Creating trip and PRN..."
+                ? t("payCharges.submittingRoute")
+                : t("payCharges.creatingTripPrn")
             }
           />
         )}
@@ -547,6 +635,7 @@ function VehicleStep({
   onSelect: (record: MotorVehicleLogbook) => void
   onContinue: () => void
 }) {
+  const { t } = useTranslation()
   const [plate, setPlate] = useState(selected?.plateNumber ?? "")
   const [isLookingUp, setIsLookingUp] = useState(false)
   const [lookupError, setLookupError] = useState<string | null>(null)
@@ -561,7 +650,7 @@ function VehicleStep({
   const lookup = async () => {
     const compact = compactPlateNumber(plate)
     if (!compact) {
-      setLookupError("Enter a plate number to look up.")
+      setLookupError(t("payCharges.enterPlateLookup"))
       return
     }
     setIsLookingUp(true)
@@ -569,14 +658,16 @@ function VehicleStep({
     try {
       const record = await getVehicleByPlate(compact)
       onSelect(record)
-      toast.success("Vehicle found", {
-        description: `${plateLabel(record.plateNumber)} is ready for trip creation.`,
+      toast.success(t("landing.vehicleFound"), {
+        description: t("payCharges.vehicleReadyTrip", {
+          plate: plateLabel(record.plateNumber),
+        }),
       })
     } catch (error) {
       setLookupError(
         error instanceof Error
           ? error.message
-          : "Vehicle was not found in Motorvehicle."
+          : t("payCharges.vehicleNotFoundMotorvehicle")
       )
     } finally {
       setIsLookingUp(false)
@@ -587,8 +678,8 @@ function VehicleStep({
     <>
       <Card className="gap-5">
         <SectionHeader
-          eyebrow="Lookup vehicle"
-          description="Enter a plate number. The trip flow uses the Motorvehicle lookup record for rating, invoice, and route decisions."
+          eyebrow={t("payCharges.lookupVehicle")}
+          description={t("payCharges.lookupVehicleDescription")}
         />
 
         <div className="grid grid-cols-1 gap-5">
@@ -608,7 +699,7 @@ function VehicleStep({
                       void lookup()
                     }
                   }}
-                  placeholder="Enter plate, e.g. AHS270MP"
+                  placeholder="AHS270MP"
                   className="h-10 rounded-lg pl-8 font-mono text-sm tracking-wide"
                 />
               </div>
@@ -619,7 +710,7 @@ function VehicleStep({
                 className="h-10 rounded-lg"
               >
                 {isLookingUp ? <Spinner /> : <Search className="size-3.5" />}
-                Lookup
+                {t("common.lookup")}
               </Button>
             </div>
 
@@ -644,12 +735,10 @@ function VehicleStep({
                   </span>
                   <div>
                     <p className="text-sm font-semibold text-foreground">
-                      No vehicle selected
+                      {t("payCharges.noVehicleSelected")}
                     </p>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      Lookup a plate in Motorvehicle to pull make, model,
-                      capacity, owner/operator, and logbook identifiers before
-                      continuing.
+                      {t("payCharges.noVehicleDescription")}
                     </p>
                   </div>
                 </div>
@@ -660,8 +749,8 @@ function VehicleStep({
       </Card>
 
       <Footer
-        backLabel="Cancel"
-        continueLabel="Continue to circulation"
+        backLabel={t("common.cancel")}
+        continueLabel={t("payCharges.continueCirculation")}
         onBack={() => history.back()}
         onContinue={onContinue}
         disabled={!selected}
@@ -681,9 +770,10 @@ function VehicleDetailsCard({
   category: WeightCategory | null
   image: string | null
 }) {
+  const { t } = useTranslation()
   const capacityLabel = vehicle.weightKg
     ? `${formatMzn(vehicle.weightKg)} kg`
-    : "Not recorded"
+    : t("common.notRecorded")
   const tier = weightTierForKg(vehicle.weightKg)
   const tone = category === "RESTRICTED_HEAVY" ? "warning" : "compliant"
   return (
@@ -692,19 +782,19 @@ function VehicleDetailsCard({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              Motorvehicle record
+              {t("payCharges.motorvehicleRecord")}
             </p>
             <h2 className="mt-1 truncate font-mono text-2xl font-semibold tracking-wide text-foreground">
               {vehicle.plate}
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              {vehicle.model} · {record.truckNumber ?? "No truck number"}
+              {vehicle.model} · {record.truckNumber ?? t("payCharges.noTruckNumber")}
             </p>
           </div>
           <StatusPill tone={tone}>
             {category === "RESTRICTED_HEAVY"
-              ? "Heavy route required"
-              : "Medium direct PRN"}
+              ? t("payCharges.heavyRouteRequired")
+              : t("payCharges.mediumDirectPrn")}
           </StatusPill>
         </div>
 
@@ -713,13 +803,13 @@ function VehicleDetailsCard({
             <div className="aspect-[4/3]">
               <img
                 src={image}
-                alt={`${vehicle.plate} ${tier?.label ?? "vehicle"} weight class`}
+                alt={`${vehicle.plate} ${tier?.label ?? t("common.vehicle")}`}
                 className="h-full w-full object-contain p-3"
               />
             </div>
             <div className="border-t border-border px-3 py-2">
               <p className="text-xs font-medium text-foreground">
-                {tier?.rangeLabel ?? "Below rated range"}
+                {tier?.rangeLabel ?? t("payCharges.belowRatedRange")}
               </p>
             </div>
           </div>
@@ -727,19 +817,19 @@ function VehicleDetailsCard({
       </div>
 
       <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2">
-        <Meta label="Capacity / GVW" value={capacityLabel} />
+        <Meta label={t("payCharges.capacityGvw")} value={capacityLabel} />
         <Meta
-          label="Operator"
+          label={t("common.operator")}
           value={
-            record.operatorName ?? record.operatorReference ?? "Not recorded"
+            record.operatorName ?? record.operatorReference ?? t("common.notRecorded")
           }
         />
-        <Meta label="Logbook" value={vehicle.logbookRef} mono />
-        <Meta label="Chassis / VIN" value={vehicle.chassisVin} mono />
-        <Meta label="Engine" value={vehicle.engineNumber} mono />
-        <Meta label="Fuel" value={record.fuelType ?? "Not recorded"} />
-        <Meta label="Colour" value={vehicle.color} />
-        <Meta label="Registry status" value={record.status ?? "Not recorded"} />
+        <Meta label={t("landing.logbook")} value={vehicle.logbookRef} mono />
+        <Meta label={t("payCharges.chassisVin")} value={vehicle.chassisVin} mono />
+        <Meta label={t("common.engine")} value={vehicle.engineNumber} mono />
+        <Meta label={t("common.fuel")} value={record.fuelType ?? t("common.notRecorded")} />
+        <Meta label={t("common.colour")} value={vehicle.color} />
+        <Meta label={t("payCharges.registryStatus")} value={record.status ?? t("common.notRecorded")} />
       </div>
     </div>
   )
@@ -756,6 +846,7 @@ function CirculationStep({
   onBack: () => void
   onContinue: () => void
 }) {
+  const { t } = useTranslation()
   const setDays = (days: number) => {
     setForm((current) => {
       const from = current.range.from ?? today0
@@ -785,8 +876,8 @@ function CirculationStep({
     <>
       <Card>
         <SectionHeader
-          eyebrow="Daily / special circulation"
-          description="Pick daily circulation or the 30-day special circulation licence, then confirm dates on the calendar."
+          eyebrow={t("payCharges.dailySpecial")}
+          description={t("payCharges.dailySpecialDescription")}
         />
         <div className="flex flex-wrap gap-2">
           {[1, 2, 3, 7, 14, 30].map((days) => {
@@ -804,15 +895,15 @@ function CirculationStep({
                 )}
               >
                 {days === 30
-                  ? "Special · 30 days"
-                  : `${days} day${days === 1 ? "" : "s"}`}
+                  ? t("payCharges.special30Days")
+                  : t("common.days", { count: days })}
               </button>
             )
           })}
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <DateBlock label="Starts" date={form.range.from} />
-          <DateBlock label="Ends" date={form.range.to} />
+          <DateBlock label={t("payCharges.starts")} date={form.range.from} />
+          <DateBlock label={t("payCharges.ends")} date={form.range.to} />
         </div>
         <div className="overflow-hidden rounded-xl border border-border bg-muted/20 p-2">
           <Calendar
@@ -825,8 +916,8 @@ function CirculationStep({
         </div>
       </Card>
       <Footer
-        backLabel="Back to vehicle"
-        continueLabel="Continue"
+        backLabel={t("payCharges.backToVehicle")}
+        continueLabel={t("common.continue")}
         onBack={onBack}
         onContinue={onContinue}
         disabled={!form.range.from || !form.range.to || form.durationDays < 1}
@@ -848,6 +939,7 @@ function RouteStep({
   onKnownRoute: (routeId: string) => void
   onUnknownRoute: () => void
 }) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState("")
   const routesQuery = useQuery({
     queryKey: ["municipal-routes", MUNICIPALITY_ID],
@@ -865,8 +957,8 @@ function RouteStep({
     <>
       <Card>
         <SectionHeader
-          eyebrow="Route selection"
-          description="Heavy trucks require an active special-permit route. If the route is not listed, submit a route request with test coordinates for security review."
+          eyebrow={t("payCharges.routeSelection")}
+          description={t("payCharges.routeSelectionDescription")}
         />
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -879,7 +971,7 @@ function RouteStep({
                 routeName: event.target.value,
               }))
             }}
-            placeholder="Search known route or type an unknown route name..."
+            placeholder={t("payCharges.routeSearch")}
             className="h-9 rounded-lg pl-8 text-sm"
           />
         </div>
@@ -887,7 +979,7 @@ function RouteStep({
         {routesQuery.isLoading ? (
           <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border py-10 text-sm text-muted-foreground">
             <Spinner />
-            Loading municipal routes...
+            {t("payCharges.loadingRoutes")}
           </div>
         ) : (
           <ul className="max-h-[360px] divide-y divide-border overflow-y-auto rounded-lg border border-border">
@@ -922,7 +1014,7 @@ function RouteStep({
                       </span>
                     </span>
                     {selected && (
-                      <StatusPill tone="compliant">Selected</StatusPill>
+                      <StatusPill tone="compliant">{t("common.selected")}</StatusPill>
                     )}
                   </button>
                 </li>
@@ -930,7 +1022,7 @@ function RouteStep({
             })}
             {filtered.length === 0 && (
               <li className="px-4 py-8 text-center text-xs text-muted-foreground">
-                No active route matches this search.
+                {t("payCharges.noRouteMatches")}
               </li>
             )}
           </ul>
@@ -940,22 +1032,20 @@ function RouteStep({
           <MapIcon className="mt-0.5 size-4 shrink-0 text-secondary" />
           <div className="flex-1">
             <p className="text-sm font-semibold text-foreground">
-              Route not defined
+              {t("payCharges.routeNotDefined")}
             </p>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-              This sends a special-permit route request with generated Maputo
-              test coordinates. The API creates no trip, invoice, or PRN until
-              review is complete.
+              {t("payCharges.routeNotDefinedDescription")}
             </p>
           </div>
           <Button size="sm" variant="outline" onClick={onUnknownRoute}>
-            Submit request
+            {t("payCharges.submitRequest")}
           </Button>
         </div>
       </Card>
       <Footer
-        backLabel="Back to circulation"
-        continueLabel="Create trip with route"
+        backLabel={t("payCharges.backToCirculation")}
+        continueLabel={t("payCharges.createTripWithRoute")}
         onBack={onBack}
         onContinue={() => form.routeId && onKnownRoute(form.routeId)}
         disabled={!form.routeId}
@@ -979,6 +1069,7 @@ function InvoiceStep({
   onBack: () => void
   onContinue: () => void
 }) {
+  const { t } = useTranslation()
   const vehicle = form.vehicle!
   const invoice = form.tripResult?.invoice ?? null
   const prn = invoicePrn(invoice)
@@ -990,18 +1081,18 @@ function InvoiceStep({
           <div className="flex items-start gap-3">
             <img
               src="/maputo-logo.webp"
-              alt="Municipio de Maputo"
+              alt={t("common.municipalityMaputo")}
               className="size-14 shrink-0 rounded-lg bg-card object-contain p-1"
             />
             <div>
               <p className="text-[10px] font-semibold tracking-widest text-secondary uppercase">
-                New trip invoice
+                {t("payCharges.newTripInvoice")}
               </p>
               <p className="mt-0.5 text-base leading-tight font-semibold">
                 Conselho Municipal de Maputo
               </p>
               <p className="text-[11px] leading-snug text-sidebar-foreground/70">
-                PRN generated by Core for prepaid circulation
+                {t("payCharges.prnGeneratedByCore")}
               </p>
             </div>
           </div>
@@ -1012,7 +1103,7 @@ function InvoiceStep({
         <section className="grid grid-cols-1 gap-6 border-b border-border p-6 sm:grid-cols-2">
           <div>
             <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              Vehicle
+              {t("common.vehicle")}
             </p>
             <p className="mt-1.5 font-mono text-lg font-semibold tracking-wide text-foreground">
               {vehicle.plate}
@@ -1022,18 +1113,20 @@ function InvoiceStep({
             </p>
           </div>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
-            <Meta label="Trip" value={form.tripResult?.trip.id ?? "-"} mono />
+            <Meta label={t("fleet.trip")} value={form.tripResult?.trip.id ?? "-"} mono />
             <Meta label="PRN" value={prn} mono />
             <Meta
-              label="Coverage"
-              value={`${format(form.range.from ?? today0, "d MMM")} - ${format(
+              label={t("payCharges.coverage")}
+              value={`${formatDate(form.range.from ?? today0, "d MMM")} - ${formatDate(
                 form.range.to ?? form.range.from ?? today0,
                 "d MMM yyyy"
               )}`}
             />
             <Meta
-              label="Duration"
-              value={`${form.chargeKind === "special" ? 30 : form.durationDays} days`}
+              label={t("common.duration")}
+              value={t("common.days", {
+                count: form.chargeKind === "special" ? 30 : form.durationDays,
+              })}
             />
           </dl>
         </section>
@@ -1042,14 +1135,14 @@ function InvoiceStep({
             <InvoiceLine
               label={
                 form.chargeKind === "special"
-                  ? "Special circulation licence"
-                  : "Daily circulation"
+                  ? t("payCharges.specialLicence")
+                  : t("payCharges.dailyCirculation")
               }
               value={`${formatMzn(total)} ${currency}`}
             />
             <InvoiceLine label="PRN" value={prn} mono />
             <InvoiceLine
-              label="Total payable"
+              label={t("payCharges.totalPayable")}
               value={`${formatMzn(total)} ${currency}`}
               emphasised
             />
@@ -1057,8 +1150,8 @@ function InvoiceStep({
         </section>
       </article>
       <Footer
-        backLabel="Back"
-        continueLabel="Continue to PRN payment"
+        backLabel={t("common.back")}
+        continueLabel={t("payCharges.continuePrnPayment")}
         onBack={onBack}
         onContinue={onContinue}
       />
@@ -1079,13 +1172,16 @@ function PaymentStep({
   onBack: () => void
   onSubmit: () => void
 }) {
+  const { t } = useTranslation()
   const walletShort = form.channel === "wallet" && total > WALLET_BALANCE_MZN
   return (
     <>
       <Card>
         <SectionHeader
-          eyebrow="PRN payment"
-          description={`Settle ${invoicePrn(form.tripResult?.invoice ?? null)} using the preferred channel.`}
+          eyebrow={t("payCharges.prnPayment")}
+          description={t("payCharges.prnPaymentDescription", {
+            prn: invoicePrn(form.tripResult?.invoice ?? null),
+          })}
         />
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {PAYMENT_CHANNELS.map((channel) => {
@@ -1122,10 +1218,16 @@ function PaymentStep({
                 </span>
                 <span>
                   <span className="block text-sm font-semibold text-foreground">
-                    {channel.title}
+                    {paymentChannelLabel(channel.key, t)}
                   </span>
                   <span className="block text-[11px] text-muted-foreground">
-                    {channel.subtitle}
+                    {channel.key === "wallet"
+                      ? t("payCharges.channels.walletSubtitle", {
+                          amount: formatMzn(WALLET_BALANCE_MZN),
+                        })
+                      : channel.key === "card"
+                        ? t("payCharges.channels.cardSubtitle")
+                        : t("payCharges.channels.mobileMoneySubtitle")}
                   </span>
                 </span>
               </button>
@@ -1134,7 +1236,7 @@ function PaymentStep({
         </div>
         {form.channel === "mobile" && (
           <Field>
-            <FieldLabel htmlFor="msisdn">Mobile money number</FieldLabel>
+            <FieldLabel htmlFor="msisdn">{t("payCharges.mobileMoneyNumber")}</FieldLabel>
             <Input
               id="msisdn"
               inputMode="tel"
@@ -1143,14 +1245,14 @@ function PaymentStep({
               className="font-mono tracking-wide"
             />
             <FieldDescription>
-              A USSD prompt will authorise the {formatMzn(total)} MZN debit.
+              {t("payCharges.ussdPrompt", { amount: formatMzn(total) })}
             </FieldDescription>
           </Field>
         )}
       </Card>
       <Footer
-        backLabel="Back to invoice"
-        continueLabel={`Pay ${formatMzn(total)} MZN`}
+        backLabel={t("payCharges.backToInvoice")}
+        continueLabel={t("payCharges.payAmount", { amount: formatMzn(total) })}
         onBack={onBack}
         onContinue={onSubmit}
         disabled={walletShort}
@@ -1160,6 +1262,7 @@ function PaymentStep({
 }
 
 function ProcessingStep({ label }: { label: string }) {
+  const { t } = useTranslation()
   return (
     <Card className="items-center text-center">
       <div className="flex flex-col items-center gap-4 py-8">
@@ -1170,7 +1273,7 @@ function ProcessingStep({ label }: { label: string }) {
         <div>
           <p className="text-base font-semibold text-foreground">{label}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Waiting for the deployed Core API response.
+            {t("payCharges.waitingCore")}
           </p>
         </div>
       </div>
@@ -1185,6 +1288,7 @@ function ReceiptStep({
   result: Extract<PaymentResult, { kind: "success" }>
   onNewTrip: () => void
 }) {
+  const { t } = useTranslation()
   const receipt = result.receipt
   return (
     <>
@@ -1194,19 +1298,22 @@ function ReceiptStep({
         </span>
         <div className="flex-1">
           <p className="text-base font-semibold text-foreground">
-            Payment confirmed
+            {t("payCharges.paymentConfirmed")}
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {formatMzn(receipt.totalMzn)} MZN charged to {receipt.channelLabel}.
-            Receipt {receipt.number} issued.
+            {t("payCharges.paymentConfirmedDescription", {
+              amount: formatMzn(receipt.totalMzn),
+              channel: receipt.channelLabel,
+              number: receipt.number,
+            })}
           </p>
         </div>
-        <StatusPill tone="compliant">Paid</StatusPill>
+        <StatusPill tone="compliant">{t("payCharges.paid")}</StatusPill>
       </div>
       <Card>
         <SectionHeader
-          eyebrow="Digital receipt"
-          description="Vehicle tax receipt for roadside verification."
+          eyebrow={t("payCharges.digitalReceipt")}
+          description={t("payCharges.receiptDescription")}
         />
         <div className="relative mx-auto flex aspect-square w-full max-w-[380px] flex-col items-center justify-center overflow-hidden rounded-full border border-primary/25 bg-card p-8 text-center shadow-[0_24px_70px_rgba(15,23,42,0.12)] ring-8 ring-primary/5">
           <img
@@ -1217,7 +1324,7 @@ function ReceiptStep({
           />
           <div className="relative min-w-0">
             <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              Paid road user charge
+              {t("payCharges.paidRoadUserCharge")}
             </p>
             <p className="mt-2 font-mono text-3xl font-semibold tracking-wide text-foreground">
               {receipt.vehiclePlate}
@@ -1238,8 +1345,8 @@ function ReceiptStep({
         </div>
       </Card>
       <Footer
-        backLabel="View trips"
-        continueLabel="Create another trip"
+        backLabel={t("payCharges.viewTrips")}
+        continueLabel={t("payCharges.createAnotherTrip")}
         onBack={() => history.back()}
         onContinue={onNewTrip}
       />
@@ -1254,6 +1361,7 @@ function SubmittedStep({
   request: SpecialPermitRouteRequest
   onNewTrip: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <>
       <div className="flex items-center gap-3 rounded-xl border border-secondary/40 bg-accent/60 p-4">
@@ -1262,30 +1370,32 @@ function SubmittedStep({
         </span>
         <div className="flex-1">
           <p className="text-base font-semibold text-foreground">
-            Route request submitted
+            {t("payCharges.routeRequestSubmitted")}
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {request.routeName} is {request.status}. No trip, invoice, or PRN is
-            created until review is complete.
+            {t("payCharges.routeRequestSubmittedDescription", {
+              routeName: request.routeName,
+              status: request.status,
+            })}
           </p>
         </div>
-        <StatusPill tone="warning">Pending review</StatusPill>
+        <StatusPill tone="warning">{t("payCharges.pendingReview")}</StatusPill>
       </div>
       <Card>
-        <SectionHeader eyebrow="Request details" />
+        <SectionHeader eyebrow={t("payCharges.requestDetails")} />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Meta label="Request ID" value={request.id} mono />
-          <Meta label="Vehicle" value={request.vehicleId} mono />
-          <Meta label="Municipality" value={request.municipalityId} mono />
+          <Meta label={t("payCharges.requestId")} value={request.id} mono />
+          <Meta label={t("common.vehicle")} value={request.vehicleId} mono />
+          <Meta label={t("payCharges.municipality")} value={request.municipalityId} mono />
           <Meta
-            label="Duration"
-            value={`${request.expectedDurationDays} days`}
+            label={t("common.duration")}
+            value={t("common.days", { count: request.expectedDurationDays })}
           />
         </div>
       </Card>
       <Footer
-        backLabel="View trips"
-        continueLabel="Create another trip"
+        backLabel={t("payCharges.viewTrips")}
+        continueLabel={t("payCharges.createAnotherTrip")}
         onBack={() => history.back()}
         onContinue={onNewTrip}
       />
@@ -1306,18 +1416,19 @@ function TripSummary({
   step: StepKey
   onPrimary: () => void
 }) {
+  const { t } = useTranslation()
   const primaryLabel =
     step === "vehicle"
-      ? "Continue to circulation"
+      ? t("payCharges.continueCirculation")
       : step === "circulation"
         ? category === "RESTRICTED_HEAVY"
-          ? "Continue to route"
-          : "Create trip + PRN"
+          ? t("payCharges.continueRoute")
+          : t("payCharges.createTripPrn")
         : step === "route"
-          ? "Create trip + PRN"
+          ? t("payCharges.createTripPrn")
           : step === "invoice"
-            ? "Continue to payment"
-            : `Pay ${formatMzn(total)} MZN`
+            ? t("payCharges.continuePayment")
+            : t("payCharges.payAmount", { amount: formatMzn(total) })
   const disabled =
     step === "vehicle"
       ? !form.vehicle
@@ -1330,22 +1441,22 @@ function TripSummary({
   return (
     <section className="relative overflow-hidden rounded-xl bg-sidebar p-5 text-sidebar-foreground">
       <p className="text-[10px] font-semibold tracking-widest text-secondary uppercase">
-        Trip summary
+        {t("payCharges.tripSummary")}
       </p>
       <div className="mt-3 space-y-2 border-b border-sidebar-border/40 pb-3 text-xs">
-        <SummaryLine label="Vehicle" value={form.vehicle?.plate ?? "-"} mono />
-        <SummaryLine label="Class" value={category ?? "-"} />
+        <SummaryLine label={t("common.vehicle")} value={form.vehicle?.plate ?? "-"} mono />
+        <SummaryLine label={t("common.class")} value={category ?? "-"} />
         <SummaryLine
-          label="Circulation"
-          value={form.chargeKind === "special" ? "Special · 30 days" : "Daily"}
+          label={t("payCharges.circulation")}
+          value={form.chargeKind === "special" ? t("payCharges.special30Days") : t("payCharges.daily")}
         />
-        <SummaryLine label="Days" value={`${form.durationDays}`} />
+        <SummaryLine label={t("common.duration")} value={`${form.durationDays}`} />
         {category === "RESTRICTED_HEAVY" && (
-          <SummaryLine label="Route" value={form.routeName || "-"} />
+          <SummaryLine label={t("common.route")} value={form.routeName || "-"} />
         )}
       </div>
       <div className="mt-4 flex items-end justify-between">
-        <p className="text-sm text-sidebar-foreground/80">Estimated total</p>
+        <p className="text-sm text-sidebar-foreground/80">{t("payCharges.estimatedTotal")}</p>
         <p className="text-3xl font-semibold tracking-tight">
           {formatMzn(total)}
           <span className="ml-1 align-baseline text-sm font-medium text-sidebar-foreground/70">
@@ -1410,7 +1521,7 @@ function DateBlock({ label, date }: { label: string; date: Date | undefined }) {
         {label}
       </p>
       <p className="mt-1 text-base font-semibold text-foreground">
-        {date ? format(date, "EEE, d MMM yyyy") : "-"}
+        {date ? formatDate(date, "EEE, d MMM yyyy") : "-"}
       </p>
     </div>
   )
