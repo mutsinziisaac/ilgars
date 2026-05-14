@@ -45,6 +45,7 @@ export function TopBar() {
 
 function PermitsTopBar() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
       <div className="flex min-w-0 flex-col leading-tight">
@@ -67,6 +68,7 @@ function PermitsTopBar() {
         <NotificationsButton />
         <Button
           size="sm"
+          onClick={() => navigate("/portal/permits?mode=new")}
           className="rounded-lg bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
         >
           <Plus />

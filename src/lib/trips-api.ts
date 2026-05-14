@@ -114,12 +114,72 @@ export type TripCreateResult = {
 
 export type MunicipalRoute = {
   id: string
+  code?: string
   routeName?: string
   name?: string
   routeCode?: string
+  roadType?: string
+  distanceKm?: number
   allowedUse?: string
+  allowedUses?: string[]
   active?: boolean
   geoJson?: string
+  [key: string]: unknown
+}
+
+export type RoadClosurePurpose =
+  | "CONSTRUCTION"
+  | "FILMING"
+  | "SPORTING_EVENT"
+  | "PARADE"
+  | "PRIVATE_EVENT"
+  | "PROTOCOL"
+  | "OTHER"
+
+export type RoadClosurePermitCreatePayload = {
+  municipalityId: string
+  routeId: string
+  applicantName: string
+  applicantPhone: string
+  purpose: RoadClosurePurpose
+  requestedStartAt: string
+  requestedEndAt: string
+  conditions?: string
+}
+
+export type RoadClosurePermitInvoice = {
+  id?: string
+  prn?: string
+  amount?: number
+  totalAmount?: number
+  currency?: string
+  status?: string
+  distanceKm?: number
+  durationHours?: number
+  ratePerKmHour?: number
+  [key: string]: unknown
+}
+
+export type RoadClosurePermit = {
+  id: string
+  status: string
+  municipalityId?: string
+  applicantName?: string
+  applicantPhone?: string
+  purpose?: RoadClosurePurpose | string
+  requestedStartAt?: string
+  requestedEndAt?: string
+  conditions?: string | null
+  route?: Partial<MunicipalRoute> & {
+    distanceKm?: number
+  }
+  invoice?: RoadClosurePermitInvoice | null
+  licence?: {
+    licenceType?: string
+    licenceNumber?: string
+    qrPayload?: unknown
+    [key: string]: unknown
+  } | null
   [key: string]: unknown
 }
 
@@ -302,13 +362,53 @@ export async function getTripDetail(tripId: string) {
 
 export async function listMunicipalRoutes(
   municipalityId: string,
-  options: { skipAuth?: boolean } = {}
+  options: {
+    allowedUse?: "SPECIAL_PERMIT" | "ROAD_CLOSURE"
+    skipAuth?: boolean
+  } = {}
 ) {
+  const allowedUse = options.allowedUse ?? "SPECIAL_PERMIT"
   const response = await apiRequest<Wrapped<MunicipalRoute[]>>(
     `${CORE_API_BASE_URL}/municipal-routes?municipalityId=${encodeURIComponent(
       municipalityId
-    )}&allowedUse=SPECIAL_PERMIT&active=true`,
+    )}&allowedUse=${encodeURIComponent(allowedUse)}&active=true`,
     { skipAuth: options.skipAuth }
+  )
+  return unwrap(response)
+}
+
+export async function listRoadClosureRoutes(municipalityId: string) {
+  return listMunicipalRoutes(municipalityId, { allowedUse: "ROAD_CLOSURE" })
+}
+
+export async function getMunicipalRoute(routeId: string) {
+  const response = await apiRequest<Wrapped<MunicipalRoute>>(
+    `${CORE_API_BASE_URL}/municipal-routes/${encodeURIComponent(routeId)}`
+  )
+  return unwrap(response)
+}
+
+export async function listRoadClosurePermits(
+  municipalityId: string,
+  status = "PENDING_ADMIN_APPROVAL"
+) {
+  const response = await apiRequest<Wrapped<RoadClosurePermit[]>>(
+    `${CORE_API_BASE_URL}/road-closure-permits?municipalityId=${encodeURIComponent(
+      municipalityId
+    )}&status=${encodeURIComponent(status)}`
+  )
+  return unwrap(response)
+}
+
+export async function createRoadClosurePermit(
+  payload: RoadClosurePermitCreatePayload
+) {
+  const response = await apiRequest<Wrapped<RoadClosurePermit>>(
+    `${CORE_API_BASE_URL}/road-closure-permits`,
+    {
+      method: "POST",
+      body: { data: payload },
+    }
   )
   return unwrap(response)
 }

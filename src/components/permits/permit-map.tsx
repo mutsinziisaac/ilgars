@@ -7,36 +7,58 @@ import { cn } from "@/lib/utils"
 type PermitMapProps = {
   segment: [number, number][]
   className?: string
+  emptyLabel?: string
+  interactive?: boolean
 }
 
 const SEGMENT_COLOR = "#1f3a2a"
 
-function FitBoundsOnMount({ segment }: { segment: [number, number][] }) {
+function FitBounds({ segment }: { segment: [number, number][] }) {
   const map = useMap()
   useEffect(() => {
     if (segment.length === 0) return
-    const bounds = L.latLngBounds(segment.map(([lat, lng]) => L.latLng(lat, lng)))
+    const bounds = L.latLngBounds(
+      segment.map(([lat, lng]) => L.latLng(lat, lng))
+    )
     map.fitBounds(bounds, { padding: [18, 18], animate: false })
   }, [map, segment])
   return null
 }
 
-export function PermitMap({ segment, className }: PermitMapProps) {
+export function PermitMap({
+  segment,
+  className,
+  emptyLabel,
+  interactive = false,
+}: PermitMapProps) {
   const center: [number, number] = segment[0] ?? [-25.9655, 32.5832]
+
+  if (segment.length === 0) {
+    return (
+      <div
+        className={cn(
+          "flex h-full w-full items-center justify-center bg-muted/30 px-6 text-center text-sm text-muted-foreground",
+          className
+        )}
+      >
+        {emptyLabel}
+      </div>
+    )
+  }
 
   return (
     <div className={cn("relative h-full w-full overflow-hidden", className)}>
       <MapContainer
         center={center}
         zoom={15}
-        zoomControl={false}
-        scrollWheelZoom={false}
-        doubleClickZoom={false}
-        dragging={false}
-        touchZoom={false}
-        boxZoom={false}
-        keyboard={false}
-        attributionControl={false}
+        zoomControl={interactive}
+        scrollWheelZoom={interactive}
+        doubleClickZoom={interactive}
+        dragging={interactive}
+        touchZoom={interactive}
+        boxZoom={interactive}
+        keyboard={interactive}
+        attributionControl={interactive}
         className="permit-map h-full w-full"
       >
         <TileLayer
@@ -56,7 +78,7 @@ export function PermitMap({ segment, className }: PermitMapProps) {
             lineJoin: "round",
           }}
         />
-        <FitBoundsOnMount segment={segment} />
+        <FitBounds segment={segment} />
       </MapContainer>
     </div>
   )

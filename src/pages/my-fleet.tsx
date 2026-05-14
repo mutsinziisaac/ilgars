@@ -343,7 +343,7 @@ function FleetTable({
             <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
               {t("common.class")}
             </TableHead>
-            <TableHead className="pr-5 text-right text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+            <TableHead className="pr-5 text-center text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
               {t("fleet.action")}
             </TableHead>
           </TableRow>
@@ -452,7 +452,7 @@ function FleetTableRow({ row }: { row: FleetRow }) {
         <p className="text-sm text-foreground">{row.classLabel}</p>
         <p className="mt-0.5 text-[11px] text-muted-foreground">{row.capacity}</p>
       </TableCell>
-      <TableCell className="pr-5 text-right">
+      <TableCell className="pr-5 text-center">
         <Button
           size="sm"
           variant={row.needsSettlement ? "destructive" : "outline"}
@@ -460,7 +460,7 @@ function FleetTableRow({ row }: { row: FleetRow }) {
             event.stopPropagation()
             navigate(actionPath, { state: { fleetVehicle: row.item } })
           }}
-          className="rounded-md"
+          className="mx-auto rounded-md"
         >
           {row.action === "topUp" ? t("fleet.topUp") : t("fleet.pay")}
           <ArrowRight className="size-3.5" />

@@ -1,10 +1,28 @@
-import { useMemo } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowRight, CheckCircle2, RefreshCw, Truck } from "lucide-react"
+import {
+  ArrowRight,
+  BadgeCheck,
+  CheckCircle2,
+  Download,
+  RefreshCw,
+  Truck,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
+import QRCode from "react-qr-code"
+import { toPng } from "html-to-image"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Empty,
   EmptyContent,
@@ -17,16 +35,15 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { StatusPill } from "@/components/fleet/status-pill"
 import { VehicleIllustration } from "@/components/fleet/vehicle-illustration"
-import {
-  getMyFleetVehicles,
-  type MyFleetItem,
-} from "@/lib/fleet-vehicles-api"
+import { getMyFleetVehicles, type MyFleetItem } from "@/lib/fleet-vehicles-api"
+import { formatDateValue } from "@/i18n/format"
 import { capacityClassLabel } from "@/lib/fleet-vehicle-classification"
 import { formatMzn } from "@/lib/fleet"
 import { getTripsByVehicleId, type VehicleTrip } from "@/lib/trips-api"
 import { cn } from "@/lib/utils"
 
 const FLEET_VEHICLES_QUERY_KEY = ["myfleet", "ACTIVE"] as const
+const DAY_MS = 24 * 60 * 60 * 1000
 
 type LocationState = {
   fleetVehicle?: MyFleetItem
@@ -58,6 +75,161 @@ function formatAmount(value: unknown) {
   const amount = Number(value)
   if (!Number.isFinite(amount)) return "-"
   return `${formatMzn(amount)} MZN`
+}
+
+function numberField(value: unknown) {
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : null
+}
+
+function stringField(value: unknown) {
+  return typeof value === "string" && value.trim() !== "" ? value : null
+}
+
+function firstStringField(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = stringField(record[key])
+    if (value) return value
+  }
+  return null
+}
+
+function firstFeeDate(trip: VehicleTrip, key: "coverageStart" | "coverageEnd") {
+  const payment = trip.payment
+  if (!payment || typeof payment !== "object" || !("fees" in payment))
+    return null
+  const fees = (payment as { fees?: unknown }).fees
+  if (!Array.isArray(fees)) return null
+
+  for (const fee of fees) {
+    if (!fee || typeof fee !== "object") continue
+    const value = stringField((fee as Record<string, unknown>)[key])
+    if (value) return value
+  }
+
+  return null
+}
+
+function tripStartDate(trip: VehicleTrip) {
+  return (
+    firstStringField(trip, [
+      "startAt",
+      "startsAt",
+      "startedAt",
+      "expectedStartAt",
+      "coverageStart",
+    ]) ?? firstFeeDate(trip, "coverageStart")
+  )
+}
+
+function tripEndDate(trip: VehicleTrip) {
+  return (
+    firstStringField(trip, [
+      "endAt",
+      "endsAt",
+      "endedAt",
+      "expectedEndAt",
+      "coverageEnd",
+    ]) ?? firstFeeDate(trip, "coverageEnd")
+  )
+}
+
+function tripDateLabel(value: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+
+  return formatDateValue(date, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })
+}
+
+function parseTripDate(value: string | null) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function tripPaymentMode(trip: VehicleTrip) {
+  const nested = trip.payment
+  const value =
+    nested && typeof nested === "object"
+      ? stringField((nested as Record<string, unknown>).paymentMode)
+      : null
+  return value ?? trip.paymentMode
+}
+
+function isPostpaidTrip(trip: VehicleTrip) {
+  return tripPaymentMode(trip).toUpperCase() === "POSTPAID"
+}
+
+function tripOutstandingAmount(trip: VehicleTrip) {
+  const nested = trip.payment
+  const nestedAmount =
+    nested && typeof nested === "object"
+      ? numberField((nested as Record<string, unknown>).outstandingFeeAmount)
+      : null
+  return nestedAmount ?? numberField(trip.outstandingFeeAmount) ?? 0
+}
+
+function safeFilePart(value: string) {
+  return value.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "")
+}
+
+function tripCoverage(trip: VehicleTrip, now = new Date()) {
+  const start = parseTripDate(tripStartDate(trip))
+  const end = parseTripDate(tripEndDate(trip))
+  if (!start || !end) return null
+  if (now.getTime() < start.getTime() || now.getTime() > end.getTime()) {
+    return null
+  }
+
+  const durationFromTrip =
+    typeof trip.expectedDurationDays === "number" &&
+    Number.isFinite(trip.expectedDurationDays)
+      ? Math.max(1, Math.ceil(trip.expectedDurationDays))
+      : null
+  const durationFromDates = Math.max(
+    1,
+    Math.ceil((end.getTime() - start.getTime()) / DAY_MS)
+  )
+  const totalDays = durationFromTrip ?? durationFromDates
+  const coveredDays = Math.min(
+    totalDays,
+    Math.max(1, Math.floor((now.getTime() - start.getTime()) / DAY_MS) + 1)
+  )
+
+  return {
+    start,
+    end,
+    totalDays,
+    coveredDays,
+    remainingDays: Math.max(0, totalDays - coveredDays),
+  }
+}
+
+function findCurrentTrip(trips: VehicleTrip[]) {
+  const now = new Date()
+  return trips
+    .map((trip) => ({ trip, coverage: tripCoverage(trip, now) }))
+    .filter(
+      (
+        entry
+      ): entry is {
+        trip: VehicleTrip
+        coverage: NonNullable<ReturnType<typeof tripCoverage>>
+      } => entry.coverage !== null
+    )
+    .sort((a, b) => {
+      const statusA = a.trip.status.toUpperCase()
+      const statusB = b.trip.status.toUpperCase()
+      const activeA = statusA === "OPEN" || statusA === "ACTIVE"
+      const activeB = statusB === "OPEN" || statusB === "ACTIVE"
+      if (activeA !== activeB) return activeA ? -1 : 1
+      return b.coverage.start.getTime() - a.coverage.start.getTime()
+    })[0]
 }
 
 export default function VehicleDetail() {
@@ -104,7 +276,8 @@ export default function VehicleDetail() {
 
   const tripsQuery = useQuery({
     queryKey: ["trips", vehicle?.vehicleId ?? vehicle?.vehicle.vehicleId],
-    queryFn: () => getTripsByVehicleId(vehicle!.vehicleId || vehicle!.vehicle.vehicleId),
+    queryFn: () =>
+      getTripsByVehicleId(vehicle!.vehicleId || vehicle!.vehicle.vehicleId),
     enabled: !!(vehicle?.vehicleId || vehicle?.vehicle.vehicleId),
   })
   const trips = Array.isArray(tripsQuery.data) ? tripsQuery.data : []
@@ -153,12 +326,14 @@ export default function VehicleDetail() {
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <VehicleHeroCard vehicle={vehicle} />
-        <TripActionCard vehicle={vehicle} />
+        <TripActionCard vehicle={vehicle} trips={trips} />
       </div>
 
       <Tabs defaultValue="overview" className="gap-4">
         <TabsList variant="line" className="border-b border-border pb-1">
-          <TabsTrigger value="overview">{t("vehicleDetail.overview")}</TabsTrigger>
+          <TabsTrigger value="overview">
+            {t("vehicleDetail.overview")}
+          </TabsTrigger>
           <TabsTrigger value="trips">
             {t("vehicleDetail.trips")}
             <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground tabular-nums">
@@ -170,6 +345,7 @@ export default function VehicleDetail() {
 
         <TabsContent value="overview" className="mt-0">
           <TripsCard
+            vehicle={vehicle}
             trips={trips}
             isLoading={tripsQuery.isLoading}
             error={tripsQuery.error}
@@ -179,6 +355,7 @@ export default function VehicleDetail() {
 
         <TabsContent value="trips" className="mt-0">
           <TripsCard
+            vehicle={vehicle}
             trips={trips}
             isLoading={tripsQuery.isLoading}
             error={tripsQuery.error}
@@ -219,11 +396,15 @@ function VehicleHeroCard({ vehicle }: { vehicle: MyFleetItem }) {
                 {t("vehicleDetail.truck")}{" "}
                 <span className="font-mono">{snapshot.truckNumber ?? "-"}</span>{" "}
                 · {t("common.vehicleId")}{" "}
-                <span className="font-mono">{vehicle.vehicleId || snapshot.vehicleId}</span>
+                <span className="font-mono">
+                  {vehicle.vehicleId || snapshot.vehicleId}
+                </span>
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              <StatusPill tone="compliant">{t("vehicleDetail.savedFleet")}</StatusPill>
+              <StatusPill tone="compliant">
+                {t("vehicleDetail.savedFleet")}
+              </StatusPill>
               <StatusPill tone="neutral">
                 {statusLabel(vehicle.status)}
               </StatusPill>
@@ -232,7 +413,10 @@ function VehicleHeroCard({ vehicle }: { vehicle: MyFleetItem }) {
         </div>
       </div>
       <div className="grid grid-cols-2 gap-px border-t border-border bg-border md:grid-cols-4">
-        <StatCell label={t("common.capacity")} value={formatCapacity(vehicle)} />
+        <StatCell
+          label={t("common.capacity")}
+          value={formatCapacity(vehicle)}
+        />
         <StatCell
           label={t("common.class")}
           value={capacityClassLabel({
@@ -244,23 +428,89 @@ function VehicleHeroCard({ vehicle }: { vehicle: MyFleetItem }) {
           label={t("common.registry")}
           value={statusLabel(snapshot.registryStatus)}
         />
-        <StatCell label={t("common.status")} value={statusLabel(vehicle.status)} />
+        <StatCell
+          label={t("common.status")}
+          value={statusLabel(vehicle.status)}
+        />
       </div>
     </section>
   )
 }
 
-function TripActionCard({ vehicle }: { vehicle: MyFleetItem }) {
+function TripActionCard({
+  vehicle,
+  trips,
+}: {
+  vehicle: MyFleetItem
+  trips: VehicleTrip[]
+}) {
   const { t } = useTranslation()
   const vehicleId = vehicle.vehicleId || vehicle.vehicle.vehicleId
+  const currentTrip = findCurrentTrip(trips)
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5">
       <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
         {t("vehicleDetail.roadUserCharge")}
       </p>
-      <p className="text-sm text-muted-foreground">
-        {t("vehicleDetail.chargeDescription")}
-      </p>
+      {currentTrip ? (
+        <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-primary">
+                {t("vehicleDetail.currentCoverage")}
+              </p>
+              <p className="mt-0.5 font-mono text-xs text-foreground">
+                {currentTrip.trip.id}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <StatusPill tone="compliant">
+                {t("vehicleDetail.dayOfDays", {
+                  current: currentTrip.coverage.coveredDays,
+                  total: currentTrip.coverage.totalDays,
+                })}
+              </StatusPill>
+              {isPostpaidTrip(currentTrip.trip) && (
+                <Badge
+                  variant="secondary"
+                  className="bg-primary/10 text-primary"
+                >
+                  {t("vehicleDetail.postpaid")}
+                </Badge>
+              )}
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <StatMini
+              label={t("vehicleDetail.covered")}
+              value={t("common.days", {
+                count: currentTrip.coverage.coveredDays,
+              })}
+            />
+            <StatMini
+              label={t("vehicleDetail.remaining")}
+              value={t("common.days", {
+                count: currentTrip.coverage.remainingDays,
+              })}
+            />
+          </div>
+          {isPostpaidTrip(currentTrip.trip) && (
+            <p className="mt-3 text-xs font-medium text-primary">
+              {t("vehicleDetail.postpaidAmount", {
+                amount: formatAmount(tripOutstandingAmount(currentTrip.trip)),
+              })}
+            </p>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground">
+            {tripDateLabel(tripStartDate(currentTrip.trip))} -{" "}
+            {tripDateLabel(tripEndDate(currentTrip.trip))}
+          </p>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {t("vehicleDetail.chargeDescription")}
+        </p>
+      )}
       <Button asChild size="sm" className="mt-auto w-fit rounded-md">
         <Link
           to={`/portal/pay-charges?vehicle=${encodeURIComponent(
@@ -273,6 +523,17 @@ function TripActionCard({ vehicle }: { vehicle: MyFleetItem }) {
         </Link>
       </Button>
     </section>
+  )
+}
+
+function StatMini({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-card px-3 py-2">
+      <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+        {label}
+      </p>
+      <p className="mt-0.5 text-sm font-semibold text-primary">{value}</p>
+    </div>
   )
 }
 
@@ -303,12 +564,14 @@ function StatCell({
 }
 
 function TripsCard({
+  vehicle,
   trips,
   isLoading,
   error,
   onRetry,
   compact = false,
 }: {
+  vehicle: MyFleetItem
   trips: VehicleTrip[]
   isLoading: boolean
   error: unknown
@@ -316,87 +579,219 @@ function TripsCard({
   compact?: boolean
 }) {
   const { t } = useTranslation()
+  const [selectedTrip, setSelectedTrip] = useState<VehicleTrip | null>(null)
   const visibleTrips = compact ? trips.slice(0, 5) : trips
 
   return (
-    <section className="flex flex-col rounded-xl border border-border bg-card">
-      <div className="flex items-center justify-between gap-4 px-5 pt-4 pb-2">
-        <h3 className="text-sm font-semibold tracking-tight text-foreground">
-          {t("vehicleDetail.trips")}
-        </h3>
-        <span className="text-xs text-muted-foreground">
-          {t("vehicleDetail.total", { count: trips.length })}
-        </span>
-      </div>
-      <div className="grid grid-cols-[1.35fr_0.8fr_0.8fr_0.7fr_0.95fr_0.7fr_1.2fr] items-center gap-x-4 border-t border-border px-5 py-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-        <span>{t("vehicleDetail.tripReason")}</span>
-        <span>{t("common.status")}</span>
-        <span>{t("vehicleDetail.billing")}</span>
-        <span>{t("vehicleDetail.fees")}</span>
-        <span>{t("vehicleDetail.outstanding")}</span>
-        <span>{t("common.duration")}</span>
-        <span>{t("vehicleDetail.payment")}</span>
-      </div>
-      {isLoading ? (
-        <div className="flex items-center justify-center gap-2 border-t border-border px-5 py-8 text-sm text-muted-foreground">
-          <Spinner />
-          {t("vehicleDetail.loadingTrips")}
+    <>
+      <section className="flex flex-col overflow-x-auto rounded-xl border border-border bg-card">
+        <div className="flex items-center justify-between gap-4 px-5 pt-4 pb-2">
+          <h3 className="text-sm font-semibold tracking-tight text-foreground">
+            {t("vehicleDetail.trips")}
+          </h3>
+          <span className="text-xs text-muted-foreground">
+            {t("vehicleDetail.total", { count: trips.length })}
+          </span>
         </div>
-      ) : error ? (
-        <div className="flex flex-col items-center gap-3 border-t border-border px-5 py-8 text-center">
-          <p className="text-sm font-medium text-foreground">
-            {t("vehicleDetail.loadTripsFailed")}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {error instanceof Error ? error.message : t("landing.tryAgain")}
-          </p>
-          <Button size="sm" variant="outline" onClick={onRetry}>
-            <RefreshCw className="size-3.5" />
-            {t("common.retry")}
+        <div className="grid min-w-[1040px] grid-cols-[1.35fr_0.8fr_0.8fr_0.75fr_0.75fr_0.7fr_0.95fr_0.7fr_1.2fr] items-center gap-x-4 border-t border-border px-5 py-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+          <span>{t("vehicleDetail.tripReason")}</span>
+          <span>{t("common.status")}</span>
+          <span>{t("vehicleDetail.billing")}</span>
+          <span>{t("vehicleDetail.start")}</span>
+          <span>{t("vehicleDetail.end")}</span>
+          <span>{t("vehicleDetail.fees")}</span>
+          <span>{t("vehicleDetail.outstanding")}</span>
+          <span>{t("common.duration")}</span>
+          <span>{t("vehicleDetail.payment")}</span>
+        </div>
+        {isLoading ? (
+          <div className="flex items-center justify-center gap-2 border-t border-border px-5 py-8 text-sm text-muted-foreground">
+            <Spinner />
+            {t("vehicleDetail.loadingTrips")}
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center gap-3 border-t border-border px-5 py-8 text-center">
+            <p className="text-sm font-medium text-foreground">
+              {t("vehicleDetail.loadTripsFailed")}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {error instanceof Error ? error.message : t("landing.tryAgain")}
+            </p>
+            <Button size="sm" variant="outline" onClick={onRetry}>
+              <RefreshCw className="size-3.5" />
+              {t("common.retry")}
+            </Button>
+          </div>
+        ) : visibleTrips.length === 0 ? (
+          <div className="border-t border-border px-5 py-8 text-center text-xs text-muted-foreground">
+            {t("vehicleDetail.noTripsRecord")}
+          </div>
+        ) : (
+          <ul className="divide-y divide-border border-t border-border">
+            {visibleTrips.map((trip, index) => (
+              <li
+                key={`${trip.id}-${index}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedTrip(trip)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault()
+                    setSelectedTrip(trip)
+                  }
+                }}
+                className="grid min-w-[1040px] cursor-pointer grid-cols-[1.35fr_0.8fr_0.8fr_0.75fr_0.75fr_0.7fr_0.95fr_0.7fr_1.2fr] items-center gap-x-4 px-5 py-3 outline-none hover:bg-muted/40 focus-visible:bg-muted/40"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-medium text-foreground">
+                    {trip.reason}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                    {trip.creationSource}
+                  </span>
+                </span>
+                <span className="text-xs text-foreground">
+                  {statusLabel(trip.status)}
+                </span>
+                <span className="text-xs text-foreground">
+                  {statusLabel(trip.billingStatus)}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {tripDateLabel(tripStartDate(trip))}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {tripDateLabel(tripEndDate(trip))}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t("vehicleDetail.feeCount", { count: trip.feeCount })}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {formatAmount(trip.outstandingFeeAmount)}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {tripDuration(trip)}
+                </span>
+                <span className="min-w-0 truncate text-xs text-muted-foreground">
+                  {tripPaymentMode(trip)} · {trip.createdBy}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <TripCertificateDialog
+        vehicle={vehicle}
+        trip={selectedTrip}
+        onOpenChange={(open) => {
+          if (!open) setSelectedTrip(null)
+        }}
+      />
+    </>
+  )
+}
+
+function TripCertificateDialog({
+  vehicle,
+  trip,
+  onOpenChange,
+}: {
+  vehicle: MyFleetItem
+  trip: VehicleTrip | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const { t } = useTranslation()
+  const certificateRef = useRef<HTMLDivElement | null>(null)
+  const [isDownloading, setIsDownloading] = useState(false)
+  const plate = vehicle.vehicle.plateNumber
+
+  const downloadCertificate = async () => {
+    if (!trip || !certificateRef.current) return
+    setIsDownloading(true)
+    try {
+      const dataUrl = await toPng(certificateRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+      })
+      const link = document.createElement("a")
+      link.download = `trip-certificate-${safeFilePart(trip.id) || "trip"}.png`
+      link.href = dataUrl
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
+  return (
+    <Dialog open={trip !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{t("vehicleDetail.certificateTitle")}</DialogTitle>
+          <DialogDescription>
+            {t("vehicleDetail.certificateDescription")}
+          </DialogDescription>
+        </DialogHeader>
+        {trip && (
+          <div
+            ref={certificateRef}
+            className="relative mx-auto flex aspect-square w-full max-w-[420px] flex-col items-center justify-center overflow-hidden rounded-full border border-primary/25 bg-card p-9 text-center shadow-[0_24px_70px_rgba(15,23,42,0.12)] ring-8 ring-primary/5"
+          >
+            <img
+              src="/maputo-logo.webp"
+              alt=""
+              aria-hidden
+              className="pointer-events-none absolute h-64 w-64 object-contain opacity-[0.12]"
+            />
+            <span className="relative flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
+              <BadgeCheck className="size-5" />
+            </span>
+            <div className="relative mt-4 min-w-0">
+              <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+                {t("vehicleDetail.certificateEyebrow")}
+              </p>
+              <p className="mt-2 font-mono text-3xl font-semibold tracking-wide text-foreground">
+                {plate}
+              </p>
+              <p className="mt-1 font-mono text-xs font-medium text-foreground">
+                {trip.id}
+              </p>
+              <p className="mx-auto mt-3 max-w-64 text-xs leading-snug text-muted-foreground">
+                {statusLabel(trip.status)} · {statusLabel(trip.billingStatus)} ·{" "}
+                {tripPaymentMode(trip)}
+              </p>
+              <p className="mt-3 text-xs text-muted-foreground">
+                {tripDateLabel(tripStartDate(trip))} -{" "}
+                {tripDateLabel(tripEndDate(trip))}
+              </p>
+              <p className="mt-1 text-xs font-medium text-foreground">
+                {formatAmount(tripOutstandingAmount(trip))}
+              </p>
+            </div>
+            <div className="relative mt-6 flex size-24 items-center justify-center rounded-full border border-border bg-background/95 p-4 shadow-sm">
+              <QRCode
+                value={trip.id}
+                size={72}
+                bgColor="transparent"
+                fgColor="currentColor"
+                title={t("vehicleDetail.qrTripId", { tripId: trip.id })}
+              />
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button
+            type="button"
+            onClick={downloadCertificate}
+            disabled={!trip || isDownloading}
+            className="rounded-md"
+          >
+            {isDownloading ? <Spinner /> : <Download className="size-4" />}
+            {t("vehicleDetail.downloadCertificate")}
           </Button>
-        </div>
-      ) : visibleTrips.length === 0 ? (
-        <div className="border-t border-border px-5 py-8 text-center text-xs text-muted-foreground">
-          {t("vehicleDetail.noTripsRecord")}
-        </div>
-      ) : (
-        <ul className="divide-y divide-border border-t border-border">
-          {visibleTrips.map((trip, index) => (
-            <li
-              key={`${trip.id}-${index}`}
-              className="grid grid-cols-[1.35fr_0.8fr_0.8fr_0.7fr_0.95fr_0.7fr_1.2fr] items-center gap-x-4 px-5 py-3"
-            >
-              <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-foreground">
-                  {trip.reason}
-                </span>
-                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                  {trip.creationSource}
-                </span>
-              </span>
-              <span className="text-xs text-foreground">
-                {statusLabel(trip.status)}
-              </span>
-              <span className="text-xs text-foreground">
-                {statusLabel(trip.billingStatus)}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {t("vehicleDetail.feeCount", { count: trip.feeCount })}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {formatAmount(trip.outstandingFeeAmount)}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {tripDuration(trip)}
-              </span>
-              <span className="min-w-0 truncate text-xs text-muted-foreground">
-                {trip.paymentMode} · {trip.createdBy}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
