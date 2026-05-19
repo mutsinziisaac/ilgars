@@ -2,18 +2,29 @@ import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
   ArrowRight,
+  ChevronRight,
+  Clock,
   LayoutList,
   Map as MapIcon,
+  Radio,
+  Receipt,
   Search,
   Truck,
 } from "lucide-react"
-import L from "leaflet"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
-import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet"
+import {
+  InfoWindow,
+  Map,
+  Marker,
+  useMap,
+  useMapsLibrary,
+} from "@vis.gl/react-google-maps"
 
+import fleetTruckIcon from "@/assets/fleet-truck.png"
 import { formatDateValue } from "@/i18n/format"
+import { GoogleMapsBoundary } from "@/components/maps/google-maps-boundary"
 import { StatusPill } from "@/components/fleet/status-pill"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -34,7 +45,24 @@ import {
   type MyFleetTripContext,
 } from "@/lib/fleet-vehicles-api"
 import { capacityClassLabel } from "@/lib/fleet-vehicle-classification"
+import {
+  getMapStyles,
+  UGANDA_BOUNDS,
+  UGANDA_CENTER,
+  UGANDA_OVERVIEW_ZOOM,
+  useResolvedTheme,
+} from "@/lib/google-maps"
 import { cn } from "@/lib/utils"
+
+const SETTLEMENT_BADGE_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='56' height='42' viewBox='0 0 56 42'>
+  <g filter='drop-shadow(0 1px 1.5px rgba(0,0,0,0.3))'>
+    <circle cx='46' cy='8' r='8' fill='#ffffff'/>
+    <circle cx='46' cy='8' r='6.5' fill='#dc2626'/>
+    <rect x='45.25' y='4.5' width='1.5' height='5' rx='0.75' fill='#ffffff'/>
+    <circle cx='46' cy='11.4' r='0.9' fill='#ffffff'/>
+  </g>
+</svg>`
+const SETTLEMENT_BADGE_URL = `data:image/svg+xml;utf8,${encodeURIComponent(SETTLEMENT_BADGE_SVG)}`
 
 type FleetAction = "pay" | "topUp"
 
@@ -59,13 +87,6 @@ type FleetRow = {
   observedAt: string | null
   searchText: string
 }
-
-const UGANDA_CENTER: [number, number] = [1.3733, 32.2903]
-const UGANDA_BOUNDS: L.LatLngBoundsExpression = [
-  [-1.6, 29.4],
-  [4.4, 35.1],
-]
-const UGANDA_OVERVIEW_ZOOM = 7
 
 function displayDate(value: unknown) {
   if (typeof value !== "string" || value.trim() === "") return "-"
@@ -123,24 +144,6 @@ function validCoordinate(latitude: unknown, longitude: unknown) {
   return latitude >= -1.6 && latitude <= 4.4 && longitude >= 29.4 && longitude <= 35.1
 }
 
-function fleetMarkerIcon(row: FleetRow) {
-  return L.divIcon({
-    className: "fleet-marker",
-    html: `<span class="fleet-marker__truck${row.needsSettlement ? " fleet-marker__truck--alert" : ""}">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M10 17h4V5H2v12h2" />
-        <path d="M14 17h1" />
-        <path d="M20 17h2v-5l-3-4h-5" />
-        <path d="M2 13h12" />
-        <circle cx="7" cy="17" r="2" />
-        <circle cx="18" cy="17" r="2" />
-      </svg>
-    </span>`,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
-    popupAnchor: [0, -10],
-  })
-}
 
 function buildFleetRows(items: MyFleetItem[], t: ReturnType<typeof useTranslation>["t"]) {
   return items
@@ -472,108 +475,217 @@ function FleetTableRow({ row }: { row: FleetRow }) {
 
 function FitFleetBounds({ rows }: { rows: FleetRow[] }) {
   const map = useMap()
+  const coreLib = useMapsLibrary("core")
 
   useEffect(() => {
+    if (!map || !coreLib) return
+
     const positions = rows
       .filter((row) => row.latitude !== null && row.longitude !== null)
-      .map((row) => L.latLng(row.latitude!, row.longitude!))
+      .map((row) => ({ lat: row.latitude!, lng: row.longitude! }))
 
     if (positions.length === 0) {
-      map.setView(UGANDA_CENTER, UGANDA_OVERVIEW_ZOOM, { animate: false })
+      map.setCenter(UGANDA_CENTER)
+      map.setZoom(UGANDA_OVERVIEW_ZOOM)
       return
     }
 
     if (positions.length === 1) {
-      map.setView(positions[0], UGANDA_OVERVIEW_ZOOM, { animate: false })
+      map.setCenter(positions[0])
+      map.setZoom(UGANDA_OVERVIEW_ZOOM)
       return
     }
 
-    map.fitBounds(L.latLngBounds(positions), {
-      padding: [36, 36],
-      animate: false,
-    })
-  }, [map, rows])
+    const bounds = new coreLib.LatLngBounds()
+    positions.forEach((position) => bounds.extend(position))
+    map.fitBounds(bounds, 36)
+  }, [map, coreLib, rows])
 
   return null
 }
 
-function FleetTruckMarker({ row }: { row: FleetRow }) {
+function FleetTruckMarker({
+  row,
+  isOpen,
+  onToggle,
+}: {
+  row: FleetRow
+  isOpen: boolean
+  onToggle: (id: string | null) => void
+}) {
   const map = useMap()
+  const markerLib = useMapsLibrary("marker")
+  const navigate = useNavigate()
   const { t } = useTranslation()
+  const position = { lat: row.latitude!, lng: row.longitude! }
+  const icon = markerLib
+    ? {
+        url: fleetTruckIcon,
+        scaledSize: new google.maps.Size(56, 42),
+        anchor: new google.maps.Point(28, 32),
+      }
+    : undefined
+  const badgeIcon =
+    markerLib && row.needsSettlement
+      ? {
+          url: SETTLEMENT_BADGE_URL,
+          scaledSize: new google.maps.Size(56, 42),
+          anchor: new google.maps.Point(28, 32),
+        }
+      : undefined
 
   return (
-    <Marker
-      position={[row.latitude!, row.longitude!]}
-      icon={fleetMarkerIcon(row)}
-      eventHandlers={{
-        click: () => {
-          map.setView([row.latitude!, row.longitude!], UGANDA_OVERVIEW_ZOOM, {
-            animate: true,
-          })
-        },
-      }}
-    >
-      <Popup>
-        <div className="min-w-48 space-y-2">
-          <div>
-            <p className="font-mono text-sm font-semibold tracking-wide">
-              {row.plate}
-            </p>
-            <p className="text-xs text-muted-foreground">{row.truckNumber}</p>
+    <>
+      <Marker
+        position={position}
+        icon={icon}
+        onClick={() => {
+          map?.panTo(position)
+          map?.setZoom(UGANDA_OVERVIEW_ZOOM)
+          onToggle(row.id)
+        }}
+      />
+      {badgeIcon && (
+        <Marker
+          position={position}
+          icon={badgeIcon}
+          clickable={false}
+          zIndex={9999}
+        />
+      )}
+      {isOpen && (
+        <InfoWindow position={position} onCloseClick={() => onToggle(null)}>
+          <div className="w-64 space-y-3 p-0.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-mono text-base font-semibold tracking-wide text-foreground">
+                  {row.plate}
+                </p>
+                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {row.truckNumber}
+                </p>
+              </div>
+              <StatusPill tone={row.tripTone} className="shrink-0">
+                {row.tripLabel}
+              </StatusPill>
+            </div>
+
+            <ul className="space-y-2 rounded-lg border border-border bg-muted/30 p-2.5">
+              <InfoRow
+                icon={Radio}
+                label={t("fleet.tracker")}
+                value={row.tracker}
+              />
+              <InfoRow
+                icon={Receipt}
+                label={t("fleet.tripPayment")}
+                value={row.tripLabel}
+                tone={row.needsSettlement ? "critical" : undefined}
+              />
+              <InfoRow
+                icon={Clock}
+                label={t("fleet.lastSeen")}
+                value={
+                  row.observedAt
+                    ? displayDate(row.observedAt)
+                    : t("fleet.noLocation")
+                }
+              />
+            </ul>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                navigate(`/portal/fleet/${encodeURIComponent(row.vehicleId)}`)
+              }
+              className="h-8 w-full justify-between gap-2 text-xs"
+            >
+              {t("common.viewDetails")}
+              <ChevronRight className="size-3.5" />
+            </Button>
           </div>
-          <div className="grid gap-1 text-xs">
-            <p>
-              <span className="font-medium">{t("fleet.tracker")}:</span>{" "}
-              {row.tracker}
-            </p>
-            <p>
-              <span className="font-medium">{t("fleet.tripPayment")}:</span>{" "}
-              {row.tripLabel}
-            </p>
-            <p>
-              <span className="font-medium">{t("fleet.lastSeen")}:</span>{" "}
-              {row.observedAt ? displayDate(row.observedAt) : t("fleet.noLocation")}
-            </p>
-          </div>
-        </div>
-      </Popup>
-    </Marker>
+        </InfoWindow>
+      )}
+    </>
+  )
+}
+
+function InfoRow({
+  icon: Icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: typeof Radio
+  label: string
+  value: string
+  tone?: "critical"
+}) {
+  return (
+    <li className="flex items-start gap-2.5">
+      <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-card text-muted-foreground">
+        <Icon className="size-3.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+          {label}
+        </p>
+        <p
+          className={cn(
+            "mt-0.5 truncate text-xs font-medium",
+            tone === "critical" ? "text-destructive" : "text-foreground"
+          )}
+        >
+          {value}
+        </p>
+      </div>
+    </li>
   )
 }
 
 function FleetMap({ rows }: { rows: FleetRow[] }) {
   const { t } = useTranslation()
+  const theme = useResolvedTheme()
+  const [openId, setOpenId] = useState<string | null>(null)
   const mappedRows = rows.filter(
     (row) => row.latitude !== null && row.longitude !== null
   )
 
   return (
-    <div className="relative h-[760px] overflow-hidden rounded-xl border border-border bg-muted/40">
-      <MapContainer
-        center={UGANDA_CENTER}
-        zoom={7}
-        minZoom={7}
-        maxBounds={UGANDA_BOUNDS}
-        maxBoundsViscosity={1}
-        zoomControl
-        scrollWheelZoom
-        attributionControl={false}
-        className="fleet-map h-full w-full"
-      >
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          subdomains={["a", "b", "c"]}
-          maxZoom={19}
-          crossOrigin
-        />
-        {mappedRows.map((row) => (
-          <FleetTruckMarker key={row.id} row={row} />
-        ))}
-        <FitFleetBounds rows={mappedRows} />
-      </MapContainer>
+    <div className="relative h-[calc(100vh-12rem)] min-h-[420px] overflow-hidden rounded-xl border border-border bg-muted/40">
+      <GoogleMapsBoundary>
+        <Map
+          key={theme}
+          defaultCenter={UGANDA_CENTER}
+          defaultZoom={UGANDA_OVERVIEW_ZOOM}
+          minZoom={UGANDA_OVERVIEW_ZOOM}
+          restriction={UGANDA_BOUNDS}
+          styles={getMapStyles(theme)}
+          gestureHandling="greedy"
+          disableDefaultUI={false}
+          zoomControl
+          mapTypeControl={false}
+          streetViewControl={false}
+          fullscreenControl={false}
+          clickableIcons={false}
+          className="h-full w-full"
+        >
+          {mappedRows.map((row) => (
+            <FleetTruckMarker
+              key={row.id}
+              row={row}
+              isOpen={openId === row.id}
+              onToggle={(id) => setOpenId(id)}
+            />
+          ))}
+          <FitFleetBounds rows={mappedRows} />
+        </Map>
+      </GoogleMapsBoundary>
 
       {mappedRows.length === 0 && (
-        <div className="absolute inset-0 z-[400] flex items-center justify-center bg-card/80 px-6 backdrop-blur-[1px]">
+        <div className="pointer-events-none absolute inset-0 z-[400] flex items-center justify-center bg-card/80 px-6 backdrop-blur-[1px]">
           <div className="flex max-w-sm flex-col items-center gap-3 text-center">
             <span className="flex size-12 items-center justify-center rounded-full bg-card text-primary shadow-sm">
               <Truck className="size-5" />

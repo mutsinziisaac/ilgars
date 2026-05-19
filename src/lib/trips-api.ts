@@ -139,8 +139,6 @@ export type RoadClosurePurpose =
 export type RoadClosurePermitCreatePayload = {
   municipalityId: string
   routeId: string
-  applicantName: string
-  applicantPhone: string
   purpose: RoadClosurePurpose
   requestedStartAt: string
   requestedEndAt: string

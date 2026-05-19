@@ -62,7 +62,6 @@ void i18n
     },
     fallbackLng: DEFAULT_LOCALE,
     supportedLngs: APP_LOCALES,
-    nonExplicitSupportedLngs: true,
     interpolation: {
       escapeValue: false,
     },

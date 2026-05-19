@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
+import { addDays, differenceInCalendarDays, format, startOfDay } from "date-fns"
+import type { DateRange } from "react-day-picker"
 import {
   ArrowRight,
   BadgeCheck,
@@ -11,12 +13,21 @@ import {
   Search,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import type { TFunction } from "i18next"
 import { toast } from "sonner"
 
 import { StatusPill } from "@/components/fleet/status-pill"
+import { RegistrationDialog } from "@/components/landing/registration-dialog"
+import { LanguageSwitcher } from "@/components/layout/language-switcher"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import {
   compactPlateNumber,
@@ -38,7 +49,7 @@ import { isHeavyVehicleWeightKg } from "@/lib/fleet-vehicle-classification"
 import { classifyFleetVehicle, type WeightCategory } from "@/lib/v4-rules"
 import { cn } from "@/lib/utils"
 
-const DURATION_OPTIONS = [1, 2, 7, 14, 30] as const
+const MAX_DURATION_DAYS = 30
 
 const VEHICLE_IMAGES = [
   "/vehicle-weight-8-16.png",
@@ -73,7 +84,10 @@ function plateLabel(plate: string | null | undefined): string {
   return (plate ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")
 }
 
-function motorVehicleToVehicle(record: MotorVehicleLogbook): Vehicle {
+function motorVehicleToVehicle(
+  record: MotorVehicleLogbook,
+  t: TFunction
+): Vehicle {
   const weightKg = normalizeCapacityKg(record)
   const makeModel = [record.make, record.model].filter(Boolean).join(" ")
   const year = record.registrationDate
@@ -84,20 +98,29 @@ function motorVehicleToVehicle(record: MotorVehicleLogbook): Vehicle {
   return {
     plate: plateLabel(record.plateNumber),
     ref: record.id,
-    model: makeModel || record.truckNumber || "Motorvehicle record",
+    model:
+      makeModel ||
+      record.truckNumber ||
+      t("common.motorvehicleRecordFallback"),
     year,
     axles,
-    configuration: weightKg >= 25_000 ? "4x2 articulated" : "Rigid",
+    configuration:
+      weightKg >= 25_000
+        ? t("common.articulatedConfig")
+        : t("common.rigidConfig"),
     weightKg,
-    color: record.colour ?? "Not recorded",
-    rucClass: isHeavyVehicleWeightKg(weightKg) ? "Heavy vehicle" : "Medium vehicle",
+    color: record.colour ?? t("common.notRecorded"),
+    rucClass: isHeavyVehicleWeightKg(weightKg)
+      ? t("common.heavyVehicle")
+      : t("common.mediumVehicle"),
     chassisVin: record.vinOrChassis ?? record.id,
-    engineNumber: record.engineNumber ?? "Not recorded",
-    logbookRef: record.logbookNumber ?? record.logbookSeries ?? "MVR record",
+    engineNumber: record.engineNumber ?? t("common.notRecorded"),
+    logbookRef:
+      record.logbookNumber ?? record.logbookSeries ?? t("common.mvrRecord"),
     odometerKm: 0,
     status: "active",
-    statusLabel: record.status ?? "Active",
-    compliance: { kind: "compliant", expDate: "Not provided" },
+    statusLabel: record.status ?? t("common.active"),
+    compliance: { kind: "compliant", expDate: t("common.notProvided") },
     driver: null,
     authorisedDrivers: [],
     mtdSpend: 0,
@@ -119,10 +142,10 @@ function invoiceAmount(invoice: TripInvoice | null, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback
 }
 
-function invoicePrn(invoice: TripInvoice | null) {
+function invoicePrn(invoice: TripInvoice | null, t: TFunction) {
   return typeof invoice?.prn === "string" && invoice.prn
     ? invoice.prn
-    : "PRN-STUB-PENDING"
+    : t("common.prnPending")
 }
 
 function estimateTotal(vehicle: Vehicle | null, days: number) {
@@ -139,18 +162,45 @@ function imageForWeightKg(weightKg: number) {
 
 export default function PublicTripLanding() {
   const { t } = useTranslation()
+  const today = useMemo(() => startOfDay(new Date()), [])
   const [plate, setPlate] = useState("")
   const [record, setRecord] = useState<MotorVehicleLogbook | null>(null)
-  const [durationDays, setDurationDays] = useState(2)
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(() => ({
+    from: today,
+    to: addDays(today, 1),
+  }))
+  const [calendarOpen, setCalendarOpen] = useState(false)
   const [routeId, setRouteId] = useState<string | null>(null)
   const [isLookingUp, setIsLookingUp] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [lookupError, setLookupError] = useState<string | null>(null)
   const [result, setResult] = useState<TripCreateResult | null>(null)
 
+  const durationDays = useMemo(() => {
+    if (!dateRange?.from) return 0
+    const end = dateRange.to ?? dateRange.from
+    return Math.max(1, differenceInCalendarDays(end, dateRange.from) + 1)
+  }, [dateRange])
+
+  const handleRangeSelect = (range: DateRange | undefined) => {
+    setResult(null)
+    if (!range?.from) {
+      setDateRange(undefined)
+      return
+    }
+    const from = range.from
+    let to = range.to ?? from
+    const span = differenceInCalendarDays(to, from) + 1
+    if (span > MAX_DURATION_DAYS) {
+      to = addDays(from, MAX_DURATION_DAYS - 1)
+    }
+    setDateRange({ from, to })
+    if (range.to) setCalendarOpen(false)
+  }
+
   const vehicle = useMemo(
-    () => (record ? motorVehicleToVehicle(record) : null),
-    [record]
+    () => (record ? motorVehicleToVehicle(record, t) : null),
+    [record, t]
   )
   const category: WeightCategory | null = vehicle
     ? classifyFleetVehicle(vehicle)
@@ -206,6 +256,7 @@ export default function PublicTripLanding() {
       })
       return
     }
+    if (durationDays < 1) return
     if (isHeavy && !routeId) return
 
     setIsCreating(true)
@@ -220,7 +271,7 @@ export default function PublicTripLanding() {
       setResult(created)
       toast.success(t("landing.tripDeclared"), {
         description: t("landing.tripDeclaredDescription", {
-          prn: invoicePrn(created.invoice),
+          prn: invoicePrn(created.invoice, t),
         }),
       })
     } catch (error) {
@@ -257,6 +308,8 @@ export default function PublicTripLanding() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <LanguageSwitcher className="border-white/20 bg-white/10 text-white hover:bg-white/20" />
+            <RegistrationDialog />
             <Button asChild variant="secondary" className="rounded-lg">
               <Link to="/portal">
                 <LockKeyhole className="size-4" />
@@ -373,30 +426,58 @@ export default function PublicTripLanding() {
                 </div>
 
                 <div>
-                  <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                    <CalendarDays className="size-4 text-muted-foreground" />
-                    {t("landing.circulationPeriod")}
+                  <div className="mb-2 flex items-center justify-between gap-2 text-sm font-semibold">
+                    <span className="flex items-center gap-2">
+                      <CalendarDays className="size-4 text-muted-foreground" />
+                      {t("landing.circulationPeriod")}
+                    </span>
+                    {durationDays > 0 && (
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t("common.days", { count: durationDays })}
+                      </span>
+                    )}
                   </div>
-                  <div className="grid grid-cols-5 gap-2">
-                    {DURATION_OPTIONS.map((days) => (
+                  <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                    <PopoverTrigger asChild>
                       <button
-                        key={days}
                         type="button"
-                        onClick={() => {
-                          setDurationDays(days)
-                          setResult(null)
-                        }}
                         className={cn(
-                          "rounded-lg border px-2 py-2 text-sm font-semibold transition-colors",
-                          durationDays === days
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : "border-border bg-card hover:border-primary/40"
+                          "flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-left text-sm transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                          calendarOpen && "border-primary/60"
                         )}
                       >
-                        {days === 30 ? "30d" : `${days}d`}
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="truncate font-medium">
+                            {dateRange?.from
+                              ? `${format(dateRange.from, "EEE, d MMM")} — ${format(
+                                  dateRange.to ?? dateRange.from,
+                                  "EEE, d MMM"
+                                )}`
+                              : t("landing.pickDates")}
+                          </span>
+                        </span>
+                        <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+                          {t("landing.changeDates")}
+                        </span>
                       </button>
-                    ))}
-                  </div>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-auto p-0">
+                      <Calendar
+                        mode="range"
+                        selected={dateRange}
+                        onSelect={handleRangeSelect}
+                        numberOfMonths={1}
+                        defaultMonth={dateRange?.from ?? today}
+                        disabled={{ before: today }}
+                      />
+                      <p className="border-t border-border bg-muted/40 px-3 py-2 text-[10px] text-muted-foreground">
+                        {t("landing.maxCirculation", {
+                          count: MAX_DURATION_DAYS,
+                        })}
+                      </p>
+                    </PopoverContent>
+                  </Popover>
                 </div>
 
                 {isHeavy && (
@@ -467,7 +548,7 @@ export default function PublicTripLanding() {
                       {t("landing.tripDeclaredGenerated")}
                     </p>
                     <p className="mt-1 font-mono text-lg font-semibold tracking-wide">
-                      {invoicePrn(result.invoice)}
+                      {invoicePrn(result.invoice, t)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {t("landing.tripAmount", {
