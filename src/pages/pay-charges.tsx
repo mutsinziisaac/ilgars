@@ -24,7 +24,7 @@ import { useLocation, useSearchParams } from "react-router-dom"
 
 import { useAuth } from "@/components/auth/auth-context"
 import { StatusPill } from "@/components/fleet/status-pill"
-import { VerticalStepper, type Step } from "@/components/fleet/vertical-stepper"
+import { VerticalStepper } from "@/components/fleet/vertical-stepper"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
@@ -111,45 +111,28 @@ type PayChargesLocationState = {
   fleetVehicle?: MyFleetItem
 }
 
-const BASE_STEPS: readonly Step<StepKey>[] = [
-  { key: "vehicle", label: "Vehicle", description: "Search mock MVR" },
-  { key: "circulation", label: "Circulation", description: "Daily or 30 days" },
-  { key: "invoice", label: "Invoice", description: "PRN generated" },
-  { key: "payment", label: "Payment", description: "Settle PRN" },
+const BASE_STEPS: readonly { key: StepKey }[] = [
+  { key: "vehicle" },
+  { key: "circulation" },
+  { key: "invoice" },
+  { key: "payment" },
 ]
 
-const HEAVY_STEPS: readonly Step<StepKey>[] = [
-  { key: "vehicle", label: "Vehicle", description: "Search mock MVR" },
-  { key: "circulation", label: "Circulation", description: "Dates + calendar" },
-  { key: "route", label: "Route", description: "Known or request" },
-  { key: "invoice", label: "Invoice", description: "PRN generated" },
-  { key: "payment", label: "Payment", description: "Settle PRN" },
+const HEAVY_STEPS: readonly { key: StepKey }[] = [
+  { key: "vehicle" },
+  { key: "circulation" },
+  { key: "route" },
+  { key: "invoice" },
+  { key: "payment" },
 ]
 
 const PAYMENT_CHANNELS: {
   key: PaymentChannel
-  title: string
-  subtitle: string
   icon: typeof Smartphone
 }[] = [
-  {
-    key: "mobile",
-    title: "Mobile money",
-    subtitle: "M-Pesa · e-Mola · mKesh",
-    icon: Smartphone,
-  },
-  {
-    key: "card",
-    title: "Card",
-    subtitle: "Visa, Mastercard",
-    icon: CreditCard,
-  },
-  {
-    key: "wallet",
-    title: "Wallet",
-    subtitle: `Balance ${formatMzn(WALLET_BALANCE_MZN)} MZN`,
-    icon: Wallet,
-  },
+  { key: "mobile", icon: Smartphone },
+  { key: "card", icon: CreditCard },
+  { key: "wallet", icon: Wallet },
 ]
 
 const VEHICLE_IMAGES = [
@@ -185,7 +168,10 @@ function plateLabel(plate: string): string {
   return plate.toUpperCase().replace(/[^A-Z0-9]/g, "")
 }
 
-function motorVehicleToVehicle(record: MotorVehicleLogbook): Vehicle {
+function motorVehicleToVehicle(
+  record: MotorVehicleLogbook,
+  t: TFunction
+): Vehicle {
   const weightKg = normalizeCapacityKg(record)
   const makeModel = [record.make, record.model].filter(Boolean).join(" ")
   const year = record.registrationDate
@@ -196,20 +182,26 @@ function motorVehicleToVehicle(record: MotorVehicleLogbook): Vehicle {
   return {
     plate: plateLabel(record.plateNumber),
     ref: record.id,
-    model: makeModel || record.truckNumber || "Mock registry vehicle",
+    model: makeModel || record.truckNumber || t("common.mockRegistryVehicle"),
     year,
     axles,
-    configuration: weightKg >= 25_000 ? "4x2 articulated" : "Rigid",
+    configuration:
+      weightKg >= 25_000
+        ? t("common.articulatedConfig")
+        : t("common.rigidConfig"),
     weightKg,
-    color: record.colour ?? "Not recorded",
-    rucClass: isHeavyVehicleWeightKg(weightKg) ? "Heavy vehicle" : "Medium vehicle",
+    color: record.colour ?? t("common.notRecorded"),
+    rucClass: isHeavyVehicleWeightKg(weightKg)
+      ? t("common.heavyVehicle")
+      : t("common.mediumVehicle"),
     chassisVin: record.vinOrChassis ?? record.id,
-    engineNumber: record.engineNumber ?? "Not recorded",
-    logbookRef: record.logbookNumber ?? record.logbookSeries ?? "MVR mock",
+    engineNumber: record.engineNumber ?? t("common.notRecorded"),
+    logbookRef:
+      record.logbookNumber ?? record.logbookSeries ?? t("common.mvrMock"),
     odometerKm: 0,
     status: "active",
-    statusLabel: record.status ?? "Active",
-    compliance: { kind: "compliant", expDate: "Not provided" },
+    statusLabel: record.status ?? t("common.active"),
+    compliance: { kind: "compliant", expDate: t("common.notProvided") },
     driver: null,
     authorisedDrivers: [],
     mtdSpend: 0,
@@ -260,12 +252,15 @@ function myFleetItemToMotorVehicle(item: MyFleetItem): MotorVehicleLogbook {
   }
 }
 
-function initialStateForFleetItem(item: MyFleetItem): FormState {
+function initialStateForFleetItem(
+  item: MyFleetItem,
+  t: TFunction
+): FormState {
   const sourceVehicle = myFleetItemToMotorVehicle(item)
   return {
     ...INITIAL_STATE,
     sourceVehicle,
-    vehicle: motorVehicleToVehicle(sourceVehicle),
+    vehicle: motorVehicleToVehicle(sourceVehicle, t),
   }
 }
 
@@ -301,10 +296,10 @@ function invoiceCurrency(invoice: TripInvoice | null) {
   return typeof invoice?.currency === "string" ? invoice.currency : "MZN"
 }
 
-function invoicePrn(invoice: TripInvoice | null) {
+function invoicePrn(invoice: TripInvoice | null, t: TFunction) {
   return typeof invoice?.prn === "string" && invoice.prn
     ? invoice.prn
-    : "PRN-STUB-PENDING"
+    : t("common.prnPending")
 }
 
 function paymentChannelLabel(channel: PaymentChannel, t: TFunction) {
@@ -333,7 +328,7 @@ export default function PayCharges() {
   const stateFleetVehicle = (location.state as PayChargesLocationState | null)
     ?.fleetVehicle
   const initialState = stateFleetVehicle
-    ? initialStateForFleetItem(stateFleetVehicle)
+    ? initialStateForFleetItem(stateFleetVehicle, t)
     : INITIAL_STATE
   const initialStep = (params.get("step") ?? "vehicle") as StepKey
   const [form, setForm] = useState<FormState>(() => initialState)
@@ -491,7 +486,7 @@ export default function PayCharges() {
               setForm({
                 ...INITIAL_STATE,
                 sourceVehicle: record,
-                vehicle: motorVehicleToVehicle(record),
+                vehicle: motorVehicleToVehicle(record, t),
               })
             }
             onContinue={() => goTo("circulation")}
@@ -640,7 +635,7 @@ function VehicleStep({
   const [plate, setPlate] = useState(selected?.plateNumber ?? "")
   const [isLookingUp, setIsLookingUp] = useState(false)
   const [lookupError, setLookupError] = useState<string | null>(null)
-  const selectedVehicle = selected ? motorVehicleToVehicle(selected) : null
+  const selectedVehicle = selected ? motorVehicleToVehicle(selected, t) : null
   const selectedCategory = selectedVehicle
     ? classifyFleetVehicle(selectedVehicle)
     : null
@@ -1073,7 +1068,7 @@ function InvoiceStep({
   const { t } = useTranslation()
   const vehicle = form.vehicle!
   const invoice = form.tripResult?.invoice ?? null
-  const prn = invoicePrn(invoice)
+  const prn = invoicePrn(invoice, t)
   const currency = invoiceCurrency(invoice)
   return (
     <>
@@ -1181,7 +1176,7 @@ function PaymentStep({
         <SectionHeader
           eyebrow={t("payCharges.prnPayment")}
           description={t("payCharges.prnPaymentDescription", {
-            prn: invoicePrn(form.tripResult?.invoice ?? null),
+            prn: invoicePrn(form.tripResult?.invoice ?? null, t),
           })}
         />
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

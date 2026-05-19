@@ -26,11 +26,11 @@ export function AppSidebar() {
   const { t } = useTranslation()
   const { user, logout } = useAuth()
   const accountLabel = user.chestId
-    ? `Chest ID ${user.chestId}`
+    ? t("shell.chestIdAccount", { id: user.chestId })
     : (user.email ?? user.username ?? t("shell.authenticated"))
 
   return (
-    <aside className="sticky top-0 flex h-svh w-60 shrink-0 flex-col gap-3 bg-sidebar p-3 text-sidebar-foreground">
+    <aside className="sticky top-3 flex h-[calc(100svh-1.5rem)] w-60 shrink-0 flex-col gap-3 rounded-2xl bg-sidebar p-3 text-sidebar-foreground shadow-lg shadow-sidebar/20 ring-1 ring-sidebar-border/60">
       <div className="flex items-center gap-2.5 px-1 pt-1">
         <img
           src="/maputo-logo.webp"

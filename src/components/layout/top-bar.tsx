@@ -12,6 +12,7 @@ import { useAuth } from "@/components/auth/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { formatDate } from "@/i18n/format"
+import { LanguageSwitcher } from "./language-switcher"
 import { findNavItem } from "./nav-config"
 
 const MOCK_TRUCK_COUNT = 12
@@ -47,7 +48,7 @@ function PermitsTopBar() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
+    <header className="sticky top-0 z-10 flex h-14 items-center justify-between gap-4 bg-background/70 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/50">
       <div className="flex min-w-0 flex-col leading-tight">
         <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
           {t("shell.permitsEyebrow")}
@@ -65,6 +66,7 @@ function PermitsTopBar() {
             className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
           />
         </div>
+        <LanguageSwitcher />
         <NotificationsButton />
         <Button
           size="sm"
@@ -90,7 +92,7 @@ function DefaultTopBar() {
   const displayName = user.firstName ?? user.displayName
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
+    <header className="sticky top-0 z-10 flex h-14 items-center justify-between gap-4 bg-background/70 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/50">
       <div className="flex min-w-0 flex-col leading-tight">
         {isFleet ? (
           <>
@@ -131,6 +133,7 @@ function DefaultTopBar() {
             />
           </div>
         )}
+        <LanguageSwitcher />
         <NotificationsButton />
         {isFleet ? (
           <Button
@@ -164,7 +167,7 @@ function CreateTopBar() {
     "logbook") as (typeof FLEET_STEP_LABELS)[number]
   const stepIndex = Math.max(0, FLEET_STEP_LABELS.indexOf(stepKey))
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
+    <header className="sticky top-0 z-10 flex h-14 items-center justify-between gap-4 bg-background/70 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/50">
       <div className="flex min-w-0 flex-col leading-tight">
         <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
           {t("shell.vehicleRegisterStep", {
@@ -185,6 +188,7 @@ function CreateTopBar() {
             className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
           />
         </div>
+        <LanguageSwitcher />
         <NotificationsButton />
         <Button
           variant="ghost"
@@ -207,7 +211,7 @@ function PayChargesTopBar() {
     "vehicle") as (typeof PAY_STEP_LABELS)[number]
   const stepIndex = Math.max(0, PAY_STEP_LABELS.indexOf(stepKey))
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
+    <header className="sticky top-0 z-10 flex h-14 items-center justify-between gap-4 bg-background/70 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/50">
       <div className="flex min-w-0 flex-col leading-tight">
         <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
           {t("shell.newTripStep", {
@@ -228,6 +232,7 @@ function PayChargesTopBar() {
             className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
           />
         </div>
+        <LanguageSwitcher />
         <NotificationsButton />
         <Button
           variant="ghost"
@@ -246,7 +251,7 @@ function DetailTopBar({ vehicleId }: { vehicleId: string }) {
   const { t } = useTranslation()
   const eyebrow = t("shell.detailEyebrow")
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-6">
+    <header className="sticky top-0 z-10 flex h-14 items-center justify-between gap-4 bg-background/70 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/50">
       <div className="flex min-w-0 items-center gap-3">
         <Link
           to="/portal/fleet"
@@ -274,6 +279,7 @@ function DetailTopBar({ vehicleId }: { vehicleId: string }) {
             className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
           />
         </div>
+        <LanguageSwitcher />
         <NotificationsButton />
       </div>
     </header>
