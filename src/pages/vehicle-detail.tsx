@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  AlertTriangle,
   ArrowRight,
   BadgeCheck,
   CheckCircle2,
@@ -34,15 +35,67 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { StatusPill } from "@/components/fleet/status-pill"
-import { VehicleIllustration } from "@/components/fleet/vehicle-illustration"
-import { getMyFleetVehicles, type MyFleetItem } from "@/lib/fleet-vehicles-api"
+import {
+  getMyFleetVehicles,
+  type MyFleetItem,
+  type MyFleetViolation,
+} from "@/lib/fleet-vehicles-api"
 import { formatDateValue } from "@/i18n/format"
+import {
+  formatViolationAmount,
+  isOpenViolation,
+  violationCodeLabel,
+  violationStatusLabel,
+  violationStatusTone,
+} from "@/lib/violations"
 import { capacityClassLabel } from "@/lib/fleet-vehicle-classification"
-import { formatMzn } from "@/lib/fleet"
+import {
+  formatMzn,
+  WEIGHT_TIERS,
+  weightTierForKg,
+  type WeightTier,
+} from "@/lib/fleet"
 import { getTripsByVehicleId, type VehicleTrip } from "@/lib/trips-api"
 import { cn } from "@/lib/utils"
 
 const FLEET_VEHICLES_QUERY_KEY = ["myfleet", "ACTIVE"] as const
+
+const VEHICLE_IMAGES = [
+  "/vehicle-weight-8-16.png",
+  "/vehicle-weight-16-25.png",
+  "/vehicle-weight-25-38.png",
+  "/vehicle-weight-38-48.png",
+  "/vehicle-weight-48-plus.png",
+] as const
+
+const VEHICLE_IMAGE_BY_TIER: Record<WeightTier["key"], (typeof VEHICLE_IMAGES)[number]> = {
+  "8-16": VEHICLE_IMAGES[0],
+  "16-25": VEHICLE_IMAGES[1],
+  "25-38": VEHICLE_IMAGES[2],
+  "38-48": VEHICLE_IMAGES[3],
+  "48+": VEHICLE_IMAGES[4],
+}
+
+function snapshotWeightKg(
+  capacity: number | null | undefined,
+  unit: string | null | undefined
+): number {
+  if (!capacity || !Number.isFinite(capacity) || capacity <= 0) return 0
+  const upper = (unit ?? "").toUpperCase()
+  if (upper === "KG") return Math.round(capacity)
+  if (upper === "TONNES" || upper === "TONS" || upper === "T")
+    return Math.round(capacity * 1000)
+  return capacity <= 200 ? Math.round(capacity * 1000) : Math.round(capacity)
+}
+
+function vehicleImageForSnapshot(
+  capacity: number | null | undefined,
+  unit: string | null | undefined
+): string {
+  const kg = snapshotWeightKg(capacity, unit)
+  const tier = weightTierForKg(kg) ?? WEIGHT_TIERS[0]
+  return VEHICLE_IMAGE_BY_TIER[tier.key]
+}
 const DAY_MS = 24 * 60 * 60 * 1000
 
 type LocationState = {
@@ -61,9 +114,8 @@ function statusLabel(value: unknown) {
 
 function formatCapacity(item: MyFleetItem) {
   const capacity = item.vehicle.capacity
-  const unit = item.vehicle.capacityUnit ?? ""
   if (typeof capacity !== "number" || !Number.isFinite(capacity)) return "-"
-  return `${capacity.toLocaleString()} ${unit}`.trim()
+  return `${capacity.toLocaleString()} kg`
 }
 
 function tripDuration(trip: VehicleTrip) {
@@ -281,6 +333,10 @@ export default function VehicleDetail() {
     enabled: !!(vehicle?.vehicleId || vehicle?.vehicle.vehicleId),
   })
   const trips = Array.isArray(tripsQuery.data) ? tripsQuery.data : []
+  const allViolations = Array.isArray(vehicle?.violations)
+    ? (vehicle?.violations as MyFleetViolation[])
+    : []
+  const openViolationCount = allViolations.filter(isOpenViolation).length
 
   if (!vehicle && fleetQuery.isLoading) {
     return (
@@ -340,10 +396,26 @@ export default function VehicleDetail() {
               {tripsQuery.data?.length ?? 0}
             </span>
           </TabsTrigger>
+          <TabsTrigger value="violations">
+            {t("fleet.violations")}
+            <span
+              className={cn(
+                "ml-1 rounded-md px-1.5 py-0.5 text-[10px] tabular-nums",
+                openViolationCount > 0
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-muted text-muted-foreground"
+              )}
+            >
+              {openViolationCount}
+            </span>
+          </TabsTrigger>
           <TabsTrigger value="activity">{t("common.activityLog")}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="mt-0">
+        <TabsContent value="overview" className="mt-0 flex flex-col gap-4">
+          {allViolations.length > 0 && (
+            <ViolationsCard violations={allViolations} compact />
+          )}
           <TripsCard
             vehicle={vehicle}
             trips={trips}
@@ -363,6 +435,10 @@ export default function VehicleDetail() {
           />
         </TabsContent>
 
+        <TabsContent value="violations" className="mt-0">
+          <ViolationsCard violations={allViolations} />
+        </TabsContent>
+
         <TabsContent value="activity" className="mt-0">
           <PlaceholderCard
             title={t("common.activityLog")}
@@ -380,12 +456,13 @@ function VehicleHeroCard({ vehicle }: { vehicle: MyFleetItem }) {
   return (
     <section className="flex flex-col rounded-xl border border-border bg-card">
       <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-[200px_minmax(0,1fr)] md:items-center">
-        <VehicleIllustration
-          axles={4}
-          size="lg"
-          hatched
-          className="h-32 w-full md:h-36"
-        />
+        <div className="flex h-32 w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/40 md:h-36">
+          <img
+            src={vehicleImageForSnapshot(snapshot.capacity, snapshot.capacityUnit)}
+            alt={snapshot.plateNumber}
+            className="h-full w-full object-contain p-2"
+          />
+        </div>
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -687,6 +764,153 @@ function TripsCard({
         }}
       />
     </>
+  )
+}
+
+function ViolationsCard({
+  violations,
+  compact = false,
+}: {
+  violations: MyFleetViolation[]
+  compact?: boolean
+}) {
+  const { t } = useTranslation()
+  const openCount = violations.filter(isOpenViolation).length
+  const visible = compact ? violations.filter(isOpenViolation) : violations
+
+  return (
+    <section className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4 pb-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold tracking-tight text-foreground">
+            {t("fleet.violations")}
+          </h3>
+          {openCount > 0 && (
+            <StatusPill tone="critical">
+              <AlertTriangle className="size-3" />
+              {t("fleet.violationCount", { count: openCount })}
+            </StatusPill>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {t("vehicleDetail.total", { count: violations.length })}
+        </span>
+      </div>
+      {visible.length === 0 ? (
+        <div className="border-t border-border px-5 py-8 text-center text-xs text-muted-foreground">
+          {t("fleet.noViolations")}
+        </div>
+      ) : (
+        <ul className="divide-y divide-border border-t border-border">
+          {visible.map((violation) => {
+            const amount = formatViolationAmount(violation)
+            const tone = violationStatusTone(violation.status)
+            const assignment = violation.assignment ?? null
+            const truckLoc = violation.truckLocation ?? null
+            return (
+              <li key={violation.id} className="px-5 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-foreground">
+                    {violationCodeLabel(violation.code ?? violation.reason, t)}
+                  </p>
+                  <StatusPill tone={tone}>
+                    {violationStatusLabel(violation.status, t)}
+                  </StatusPill>
+                </div>
+                <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-[12px] sm:grid-cols-3">
+                  {amount && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationAmount")}
+                      </dt>
+                      <dd className="font-medium text-destructive">{amount}</dd>
+                    </div>
+                  )}
+                  {violation.paymentMode && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationPaymentMode")}
+                      </dt>
+                      <dd className="text-foreground">
+                        {statusLabel(violation.paymentMode)}
+                      </dd>
+                    </div>
+                  )}
+                  {violation.createdAt && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationCreatedAt")}
+                      </dt>
+                      <dd className="text-foreground">
+                        {tripDateLabel(violation.createdAt)}
+                      </dd>
+                    </div>
+                  )}
+                  {violation.updatedAt && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationUpdatedAt")}
+                      </dt>
+                      <dd className="text-foreground">
+                        {tripDateLabel(violation.updatedAt)}
+                      </dd>
+                    </div>
+                  )}
+                  {violation.tripId && (
+                    <div className="sm:col-span-3">
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationTrip")}
+                      </dt>
+                      <dd className="break-all font-mono text-[11px] text-foreground">
+                        {violation.tripId}
+                      </dd>
+                    </div>
+                  )}
+                  {truckLoc?.hasLocation &&
+                    typeof truckLoc.latitude === "number" &&
+                    typeof truckLoc.longitude === "number" && (
+                      <div className="sm:col-span-3">
+                        <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          {t("fleet.violationLocation")}
+                        </dt>
+                        <dd className="font-mono text-[11px] text-foreground">
+                          {truckLoc.latitude.toFixed(5)},{" "}
+                          {truckLoc.longitude.toFixed(5)}
+                          {truckLoc.observedAt && (
+                            <span className="ml-2 text-muted-foreground">
+                              · {tripDateLabel(truckLoc.observedAt)}
+                            </span>
+                          )}
+                        </dd>
+                      </div>
+                    )}
+                  {assignment?.resolvedAt && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationResolvedAt")}
+                      </dt>
+                      <dd className="text-foreground">
+                        {tripDateLabel(assignment.resolvedAt)}
+                      </dd>
+                    </div>
+                  )}
+                  {assignment?.releasedAt && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationReleasedAt")}
+                      </dt>
+                      <dd className="text-foreground">
+                        {tripDateLabel(assignment.releasedAt)}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
   )
 }
 
