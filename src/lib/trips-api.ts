@@ -143,6 +143,8 @@ export type RoadClosurePermitCreatePayload = {
   requestedStartAt: string
   requestedEndAt: string
   conditions?: string
+  applicantName?: string
+  applicantPhone?: string
 }
 
 export type RoadClosurePermitInvoice = {
@@ -384,6 +386,27 @@ export async function getMunicipalRoute(routeId: string) {
     `${CORE_API_BASE_URL}/municipal-routes/${encodeURIComponent(routeId)}`
   )
   return unwrap(response)
+}
+
+export type RucPolicy = {
+  id: string
+  municipalityId: string
+  active: boolean
+  gracePeriodHours?: number
+  specialPermitCapacityThreshold: number
+  specialPermitCapacityUnit: "TONNES" | "KG" | string
+  createdAt?: string
+  [key: string]: unknown
+}
+
+export async function getActiveRucPolicy(municipalityId: string) {
+  const response = await apiRequest<Wrapped<RucPolicy[]>>(
+    `${CORE_API_BASE_URL}/ruc-policies?municipalityId=${encodeURIComponent(
+      municipalityId
+    )}&active=true`
+  )
+  const list = unwrap(response)
+  return Array.isArray(list) && list.length > 0 ? list[0] : null
 }
 
 export async function listRoadClosurePermits(

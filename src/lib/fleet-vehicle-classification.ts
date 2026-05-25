@@ -4,7 +4,18 @@ const DEFAULT_HEAVY_VEHICLE_TONNES_THRESHOLD = 20
 
 export type CapacityVehicleClass = "MEDIUM_VEHICLE" | "HEAVY_VEHICLE"
 
+let policyThresholdTonnes: number | null = null
+
+export function setHeavyVehicleThresholdFromPolicy(
+  threshold: number,
+  unit: string
+) {
+  if (!Number.isFinite(threshold) || threshold <= 0) return
+  policyThresholdTonnes = unit === "KG" ? threshold / 1000 : threshold
+}
+
 export function heavyVehicleThresholdTonnes(): number {
+  if (policyThresholdTonnes !== null) return policyThresholdTonnes
   const value = Number(import.meta.env.VITE_THRESHOLD)
   return Number.isFinite(value) && value > 0
     ? value

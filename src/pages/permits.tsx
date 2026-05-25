@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   BadgeCheck,
   CalendarIcon,
-  Check,
   Clock,
   CreditCard,
   FileText,
@@ -20,6 +19,8 @@ import { toast } from "sonner"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useSearchParams } from "react-router-dom"
 
+import { useAuth } from "@/components/auth/auth-context"
+import { PermitCertificateDialog } from "@/components/permits/permit-certificate-dialog"
 import { PermitMap } from "@/components/permits/permit-map"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -107,40 +108,20 @@ const PERMIT_PHASES: readonly PermitPhase[] = [
     icon: Clock,
   },
   {
-    key: "payment",
-    status: "APPROVED_PENDING_PAYMENT",
-    labelKey: "permits.roadClosure.phases.paymentLabel",
-    shortLabelKey: "permits.roadClosure.phases.paymentShort",
-    icon: CreditCard,
-  },
-  {
     key: "approved",
     status: "ISSUED",
     labelKey: "permits.roadClosure.phases.approvedLabel",
     shortLabelKey: "permits.roadClosure.phases.approvedShort",
     icon: BadgeCheck,
   },
+  {
+    key: "payment",
+    status: "APPROVED_PENDING_PAYMENT",
+    labelKey: "permits.roadClosure.phases.paymentLabel",
+    shortLabelKey: "permits.roadClosure.phases.paymentShort",
+    icon: CreditCard,
+  },
 ] as const
-
-function phaseIndexFromStatus(status: string | undefined): number {
-  const value = (status ?? "").toUpperCase()
-  if (
-    value === "ISSUED" ||
-    value === "APPROVED" ||
-    value === "ACTIVE" ||
-    value === "COMPLETED"
-  ) {
-    return 2
-  }
-  if (
-    value === "APPROVED_PENDING_PAYMENT" ||
-    value === "PENDING_PAYMENT" ||
-    value === "AWAITING_PAYMENT"
-  ) {
-    return 1
-  }
-  return 0
-}
 
 function initialForm(): RoadClosureForm {
   return {
@@ -187,16 +168,6 @@ function formatPurpose(
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ")
-}
-
-function formatDateTime(value: string | undefined, t: TFunction) {
-  if (!value) return t("common.notRecorded")
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date)
 }
 
 function pad2(value: number) {
@@ -261,6 +232,20 @@ function parseRouteSegment(
   })
 }
 
+function randomDigits(length: number) {
+  let out = ""
+  for (let i = 0; i < length; i++) out += Math.floor(Math.random() * 10)
+  return out
+}
+
+function randomApplicantName() {
+  return `Applicant-${randomDigits(6)}`
+}
+
+function randomApplicantPhone() {
+  return `+2587${randomDigits(8)}`
+}
+
 function isValidRequest(form: RoadClosureForm, routeId: string | null) {
   if (!routeId) return false
   if (!form.requestedStartAt || !form.requestedEndAt) return false
@@ -269,76 +254,13 @@ function isValidRequest(form: RoadClosureForm, routeId: string | null) {
   return Number.isFinite(start) && Number.isFinite(end) && end > start
 }
 
-function StatusBadge({ status }: { status: string | undefined }) {
-  const { t } = useTranslation()
-  const normalized = status ?? "PENDING_ADMIN_APPROVAL"
-  const variant =
-    normalized === "REJECTED"
-      ? "destructive"
-      : normalized === "ISSUED" || normalized === "APPROVED"
-        ? "default"
-        : "secondary"
-  return <Badge variant={variant}>{formatPurpose(normalized, t)}</Badge>
-}
+type StatusTone = "default" | "secondary" | "destructive"
 
-function PhaseStepper({ currentIndex }: { currentIndex: number }) {
-  const { t } = useTranslation()
-  return (
-    <ol className="flex items-center gap-1.5">
-      {PERMIT_PHASES.map((phase, index) => {
-        const Icon = phase.icon
-        const isDone = index < currentIndex
-        const isCurrent = index === currentIndex
-        const isLast = index === PERMIT_PHASES.length - 1
-        return (
-          <li key={phase.key} className="flex items-center gap-1.5">
-            <span className="flex flex-col items-center gap-1">
-              <span
-                aria-current={isCurrent ? "step" : undefined}
-                className={cn(
-                  "flex size-7 items-center justify-center rounded-full border text-xs transition-colors",
-                  isDone &&
-                    "border-primary bg-primary text-primary-foreground",
-                  isCurrent &&
-                    "border-primary bg-primary/10 text-primary ring-2 ring-primary/20",
-                  !isDone &&
-                    !isCurrent &&
-                    "border-border bg-card text-muted-foreground"
-                )}
-              >
-                {isDone ? (
-                  <Check className="size-3.5" />
-                ) : (
-                  <Icon className="size-3.5" />
-                )}
-              </span>
-              <span
-                className={cn(
-                  "text-[10px] font-medium whitespace-nowrap",
-                  isCurrent
-                    ? "text-foreground"
-                    : isDone
-                      ? "text-primary"
-                      : "text-muted-foreground"
-                )}
-              >
-                {t(phase.shortLabelKey)}
-              </span>
-            </span>
-            {!isLast && (
-              <span
-                aria-hidden
-                className={cn(
-                  "mb-4 h-0.5 w-6 rounded-full transition-colors sm:w-10",
-                  index < currentIndex ? "bg-primary" : "bg-border"
-                )}
-              />
-            )}
-          </li>
-        )
-      })}
-    </ol>
-  )
+function statusTone(status: string | undefined): StatusTone {
+  const normalized = status ?? "PENDING_ADMIN_APPROVAL"
+  if (normalized === "REJECTED") return "destructive"
+  if (normalized === "ISSUED" || normalized === "APPROVED") return "default"
+  return "secondary"
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
@@ -417,7 +339,35 @@ function DateTimeField({
   )
 }
 
-function PermitCard({ permit }: { permit: RoadClosurePermit }) {
+function formatDateShort(value: string | undefined) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, {
+    day: "2-digit",
+    month: "short",
+  }).format(date)
+}
+
+const STATUS_DOT_CLASSES: Record<StatusTone, string> = {
+  default: "bg-primary shadow-[0_0_0_3px_var(--color-primary)/15]",
+  secondary: "bg-muted-foreground/50",
+  destructive: "bg-destructive shadow-[0_0_0_3px_var(--color-destructive)/15]",
+}
+
+const STATUS_TEXT_CLASSES: Record<StatusTone, string> = {
+  default: "text-primary",
+  secondary: "text-muted-foreground",
+  destructive: "text-destructive",
+}
+
+function PermitCard({
+  permit,
+  onSelect,
+}: {
+  permit: RoadClosurePermit
+  onSelect: (permit: RoadClosurePermit) => void
+}) {
   const { t } = useTranslation()
   const route = permit.route as MunicipalRoute | undefined
   const invoice = permit.invoice ?? null
@@ -427,58 +377,66 @@ function PermitCard({ permit }: { permit: RoadClosurePermit }) {
       : typeof invoice?.totalAmount === "number"
         ? invoice.totalAmount
         : null
-  const phaseIndex = phaseIndexFromStatus(permit.status)
+  const tone = statusTone(permit.status)
+  const start = formatDateShort(permit.requestedStartAt)
+  const end = formatDateShort(permit.requestedEndAt)
+  const window =
+    start && end
+      ? `${start} → ${end}`
+      : (start ?? end ?? t("common.notRecorded"))
+  const statusLabel = formatPurpose(permit.status ?? "PENDING_ADMIN_APPROVAL", t)
 
   return (
-    <article className="rounded-xl border border-border bg-card p-5 shadow-xs">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <FileText className="size-4" />
-          </span>
-          <div className="min-w-0">
-            <p className="font-mono text-[11px] text-muted-foreground">
-              {permit.id}
-            </p>
-            <h3 className="mt-1 truncate text-base font-semibold text-foreground">
-              {route ? routeLabel(route) : t("common.notRecorded")}
-            </h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {formatDateTime(permit.requestedStartAt, t)} -{" "}
-              {formatDateTime(permit.requestedEndAt, t)}
-            </p>
-          </div>
+    <button
+      type="button"
+      onClick={() => onSelect(permit)}
+      className="group relative flex w-full flex-col gap-4 rounded-2xl border border-border bg-card p-5 text-left transition-all outline-none hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-[0_8px_24px_-12px_rgba(15,23,42,0.18)] focus-visible:ring-2 focus-visible:ring-ring/40"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2 font-mono text-[10px] font-medium tracking-[0.22em] text-muted-foreground uppercase">
+          <span className="text-foreground/70">Permit</span>
+          <span className="text-foreground">{permit.id}</span>
         </div>
-        <StatusBadge status={permit.status} />
+        <div className="flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className={cn("size-1.5 rounded-full", STATUS_DOT_CLASSES[tone])}
+          />
+          <span
+            className={cn(
+              "text-[11px] font-semibold tracking-wide",
+              STATUS_TEXT_CLASSES[tone]
+            )}
+          >
+            {statusLabel}
+          </span>
+        </div>
       </div>
 
-      <div className="mt-5 flex justify-center border-t border-border pt-4">
-        <PhaseStepper currentIndex={phaseIndex} />
-      </div>
+      <h3 className="text-lg leading-tight font-semibold tracking-tight text-foreground transition-colors group-hover:text-primary">
+        {route ? routeLabel(route) : t("common.notRecorded")}
+      </h3>
 
-      <div className="mt-5 grid gap-4 border-t border-border pt-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 border-t border-border pt-4 sm:grid-cols-4">
+        <Meta
+          label={t("permits.roadClosure.purpose")}
+          value={formatPurpose(permit.purpose, t)}
+        />
+        <Meta label={t("permits.roadClosure.window")} value={window} />
         <Meta
           label={t("permits.roadClosure.applicantName")}
           value={permit.applicantName ?? t("common.notRecorded")}
         />
         <Meta
-          label={t("permits.roadClosure.applicantPhone")}
-          value={permit.applicantPhone ?? t("common.notRecorded")}
-        />
-        <Meta
-          label={t("permits.roadClosure.purpose")}
-          value={formatPurpose(permit.purpose, t)}
-        />
-        <Meta
           label={t("common.total")}
           value={
             amount === null
-              ? t("common.notRecorded")
+              ? "—"
               : `${formatMzn(amount)} ${invoice?.currency ?? "MZN"}`
           }
         />
       </div>
-    </article>
+    </button>
   )
 }
 
@@ -487,9 +445,13 @@ export default function Permits() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const queryClient = useQueryClient()
+  const { user } = useAuth()
   const creating = params.get("mode") === "new"
   const [query, setQuery] = useState("")
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
+  const [selectedPermit, setSelectedPermit] = useState<RoadClosurePermit | null>(
+    null
+  )
   const [form, setForm] = useState<RoadClosureForm>(() => initialForm())
 
   const routesQuery = useQuery({
@@ -504,19 +466,19 @@ export default function Permits() {
       listRoadClosurePermits(MUNICIPALITY_ID, PERMIT_PHASES[0].status),
     enabled: !creating && !!MUNICIPALITY_ID,
   })
-  const paymentQuery = useQuery({
+  const approvedQuery = useQuery({
     queryKey: ["road-closure-permits", MUNICIPALITY_ID, PERMIT_PHASES[1].status],
     queryFn: () =>
       listRoadClosurePermits(MUNICIPALITY_ID, PERMIT_PHASES[1].status),
     enabled: !creating && !!MUNICIPALITY_ID,
   })
-  const approvedQuery = useQuery({
+  const paymentQuery = useQuery({
     queryKey: ["road-closure-permits", MUNICIPALITY_ID, PERMIT_PHASES[2].status],
     queryFn: () =>
       listRoadClosurePermits(MUNICIPALITY_ID, PERMIT_PHASES[2].status),
     enabled: !creating && !!MUNICIPALITY_ID,
   })
-  const phaseQueries = [reviewQuery, paymentQuery, approvedQuery] as const
+  const phaseQueries = [reviewQuery, approvedQuery, paymentQuery] as const
 
   const detailQuery = useQuery({
     queryKey: ["municipal-route-detail", selectedRouteId],
@@ -545,12 +507,18 @@ export default function Permits() {
     mutationFn: () => {
       if (!selectedRouteId)
         throw new Error(t("permits.roadClosure.routeRequired"))
+      const applicantName =
+        user.username?.trim() ||
+        user.displayName?.trim() ||
+        randomApplicantName()
       return createRoadClosurePermit({
         municipalityId: MUNICIPALITY_ID,
         routeId: selectedRouteId,
         purpose: form.purpose,
         requestedStartAt: toIsoFromLocalInput(form.requestedStartAt),
         requestedEndAt: toIsoFromLocalInput(form.requestedEndAt),
+        applicantName,
+        applicantPhone: randomApplicantPhone(),
         ...(form.conditions.trim()
           ? { conditions: form.conditions.trim() }
           : {}),
@@ -563,6 +531,7 @@ export default function Permits() {
       toast.success(t("permits.roadClosure.submittedToast"), {
         description: t("permits.roadClosure.submittedDescription"),
       })
+      navigate("/portal/permits")
     },
     onError: (error) => {
       toast.error(t("permits.roadClosure.submitFailed"), {
@@ -585,7 +554,7 @@ export default function Permits() {
   const phasePermits = useMemo(
     () => phaseQueries.map((query) => query.data ?? []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [reviewQuery.data, paymentQuery.data, approvedQuery.data]
+    [reviewQuery.data, approvedQuery.data, paymentQuery.data]
   )
   const totalPermits = phasePermits.reduce(
     (sum, permits) => sum + permits.length,
@@ -717,15 +686,28 @@ export default function Permits() {
                       })}
                     </div>
                   ) : (
-                    permits.map((permit) => (
-                      <PermitCard key={permit.id} permit={permit} />
-                    ))
+                    <div className="grid gap-3">
+                      {permits.map((permit) => (
+                        <PermitCard
+                          key={permit.id}
+                          permit={permit}
+                          onSelect={setSelectedPermit}
+                        />
+                      ))}
+                    </div>
                   )}
                 </TabsContent>
               )
             })}
           </Tabs>
         )}
+
+        <PermitCertificateDialog
+          permit={selectedPermit}
+          onOpenChange={(open) => {
+            if (!open) setSelectedPermit(null)
+          }}
+        />
       </div>
     )
   }

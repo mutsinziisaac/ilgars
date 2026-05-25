@@ -540,11 +540,11 @@ export type WeightTier = {
 }
 
 export const WEIGHT_TIERS: WeightTier[] = [
-  { key: "8-16", label: "8–16t", rangeLabel: "8,000–16,000 kg", minKg: 8_000, maxKg: 16_000, mznPerDay: 1_000 },
-  { key: "16-25", label: "16–25t", rangeLabel: "16,001–25,000 kg", minKg: 16_001, maxKg: 25_000, mznPerDay: 2_000 },
-  { key: "25-38", label: "25–38t", rangeLabel: "25,001–38,000 kg", minKg: 25_001, maxKg: 38_000, mznPerDay: 3_000 },
-  { key: "38-48", label: "38–48t", rangeLabel: "38,001–48,000 kg", minKg: 38_001, maxKg: 48_000, mznPerDay: 4_000 },
-  { key: "48+", label: ">48t", rangeLabel: ">48,001 kg", minKg: 48_001, maxKg: 80_000, mznPerDay: 5_000 },
+  { key: "8-16", label: "8,000–16,000 kg", rangeLabel: "8,000–16,000 kg", minKg: 8_000, maxKg: 16_000, mznPerDay: 1_000 },
+  { key: "16-25", label: "16,001–25,000 kg", rangeLabel: "16,001–25,000 kg", minKg: 16_001, maxKg: 25_000, mznPerDay: 2_000 },
+  { key: "25-38", label: "25,001–38,000 kg", rangeLabel: "25,001–38,000 kg", minKg: 25_001, maxKg: 38_000, mznPerDay: 3_000 },
+  { key: "38-48", label: "38,001–48,000 kg", rangeLabel: "38,001–48,000 kg", minKg: 38_001, maxKg: 48_000, mznPerDay: 4_000 },
+  { key: "48+", label: ">48,000 kg", rangeLabel: ">48,000 kg", minKg: 48_001, maxKg: 80_000, mznPerDay: 5_000 },
 ]
 
 export function weightTierForKg(kg: number): WeightTier | null {

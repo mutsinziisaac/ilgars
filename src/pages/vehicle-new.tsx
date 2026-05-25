@@ -125,25 +125,25 @@ const INITIAL_STATE: FormState = {
 
 const PHOTO_MAX_BYTES = 5 * 1024 * 1024
 
-function tonnesFromKg(value: number | null): number | null {
+function kgValue(value: number | null): number | null {
   return typeof value === "number" && Number.isFinite(value)
-    ? Number((value / 1000).toFixed(4))
+    ? Math.round(value)
     : null
 }
 
-function capacityTonnes(record: MotorVehicleLogbook, fallbackKg: number) {
+function capacityKg(record: MotorVehicleLogbook, fallbackKg: number) {
   if (
     typeof record.currentLogbookCapacity === "number" &&
     Number.isFinite(record.currentLogbookCapacity)
   ) {
     const value = record.currentLogbookCapacity
-    return value > 1000 ? Number((value / 1000).toFixed(4)) : value
+    return value > 1000 ? Math.round(value) : Math.round(value * 1000)
   }
 
   return (
-    tonnesFromKg(record.logbookCapacityKg) ??
-    tonnesFromKg(record.grossWeightTotalKg) ??
-    tonnesFromKg(fallbackKg) ??
+    kgValue(record.logbookCapacityKg) ??
+    kgValue(record.grossWeightTotalKg) ??
+    kgValue(fallbackKg) ??
     0
   )
 }
@@ -162,8 +162,8 @@ function buildFleetVehiclePayload(
     truckNumber: record.truckNumber || `TRK-${plateNumber}`,
     ownerName,
     operatorName: record.operatorName || "Demo Operator",
-    capacitySnapshot: capacityTonnes(record, form.weightKg),
-    capacityUnit: "TONNES",
+    capacitySnapshot: capacityKg(record, form.weightKg),
+    capacityUnit: "KG",
     registryStatus: record.status?.trim().toUpperCase() || "ACTIVE",
     exemptionStatus: record.exemptionStatus?.trim().toUpperCase() || "NONE",
     compliantForRating: true,
