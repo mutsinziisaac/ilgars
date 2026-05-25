@@ -723,7 +723,7 @@ function FormStep({
 
 function StepIndicator({ step }: { step: LandingStep }) {
   const { t } = useTranslation()
-  const visible = STEP_ORDER.filter((key) => key !== "form")
+  const visible: LandingStep[] = STEP_ORDER.filter((key) => key !== "form")
   const activeIndex = visible.indexOf(step)
   return (
     <ol className="mb-4 flex items-center gap-2">
