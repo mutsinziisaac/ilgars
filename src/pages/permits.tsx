@@ -771,7 +771,7 @@ export default function Permits() {
       toast.success(t("permits.roadClosure.submittedToast"), {
         description: t("permits.roadClosure.submittedDescription"),
       })
-      navigate("/portal/permits")
+      navigate("/portal/permits?tab=applications")
     },
     onError: (error) => {
       toast.error(t("permits.roadClosure.submitFailed"), {
@@ -880,7 +880,12 @@ export default function Permits() {
           </Alert>
         )}
 
-        <Tabs defaultValue="permits" className="gap-5">
+        <Tabs
+          defaultValue={
+            params.get("tab") === "applications" ? "applications" : "permits"
+          }
+          className="gap-5"
+        >
           <TabsList variant="line" className="border-b border-border pb-1">
             <TabsTrigger value="permits">
               <BadgeCheck />
