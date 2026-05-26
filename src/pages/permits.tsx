@@ -1,4 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react"
+import { endOfDay, startOfDay } from "date-fns"
+import type { DateRange } from "react-day-picker"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { TFunction } from "i18next"
 import {
@@ -21,6 +23,7 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { useAuth } from "@/components/auth/auth-context"
 import { PermitCertificateDialog } from "@/components/permits/permit-certificate-dialog"
+import { PermitPaymentDialog } from "@/components/permits/permit-payment-dialog"
 import { PermitMap } from "@/components/permits/permit-map"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -89,39 +92,30 @@ const PURPOSES: RoadClosurePurpose[] = [
   "OTHER",
 ]
 
-type PermitPhaseKey = "review" | "payment" | "approved"
+const PERMIT_STATUSES = [
+  "PENDING_ADMIN_APPROVAL",
+  "APPROVED_PENDING_PAYMENT",
+  "ISSUED",
+  "REJECTED",
+] as const
 
-type PermitPhase = {
-  key: PermitPhaseKey
-  status: string
-  labelKey: string
-  shortLabelKey: string
-  icon: typeof FileText
+type PermitStatusKey = (typeof PERMIT_STATUSES)[number]
+
+function permitStatusLabel(status: string | undefined, t: TFunction) {
+  const key = (status ?? "").toUpperCase()
+  if ((PERMIT_STATUSES as readonly string[]).includes(key)) {
+    return t(`permits.statuses.${key}`)
+  }
+  return formatPurpose(status, t)
 }
 
-const PERMIT_PHASES: readonly PermitPhase[] = [
-  {
-    key: "review",
-    status: "PENDING_ADMIN_APPROVAL",
-    labelKey: "permits.roadClosure.phases.reviewLabel",
-    shortLabelKey: "permits.roadClosure.phases.reviewShort",
-    icon: Clock,
-  },
-  {
-    key: "approved",
-    status: "ISSUED",
-    labelKey: "permits.roadClosure.phases.approvedLabel",
-    shortLabelKey: "permits.roadClosure.phases.approvedShort",
-    icon: BadgeCheck,
-  },
-  {
-    key: "payment",
-    status: "APPROVED_PENDING_PAYMENT",
-    labelKey: "permits.roadClosure.phases.paymentLabel",
-    shortLabelKey: "permits.roadClosure.phases.paymentShort",
-    icon: CreditCard,
-  },
-] as const
+function applicationDate(permit: RoadClosurePermit): Date | null {
+  const raw =
+    (permit.createdAt as string | undefined) ?? permit.requestedStartAt
+  if (!raw) return null
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? null : date
+}
 
 function initialForm(): RoadClosureForm {
   return {
@@ -361,6 +355,12 @@ const STATUS_TEXT_CLASSES: Record<StatusTone, string> = {
   destructive: "text-destructive",
 }
 
+const STATUS_BADGE_CLASSES: Record<StatusTone, string> = {
+  default: "bg-primary/10 text-primary ring-primary/20",
+  secondary: "bg-muted text-muted-foreground ring-border",
+  destructive: "bg-destructive/10 text-destructive ring-destructive/20",
+}
+
 function PermitCard({
   permit,
   onSelect,
@@ -440,6 +440,133 @@ function PermitCard({
   )
 }
 
+function ApplicationRow({
+  permit,
+  onPay,
+}: {
+  permit: RoadClosurePermit
+  onPay: (permit: RoadClosurePermit) => void
+}) {
+  const { t } = useTranslation()
+  const route = permit.route as MunicipalRoute | undefined
+  const tone = statusTone(permit.status)
+  const status = permitStatusLabel(permit.status, t)
+  const start = formatDateShort(permit.requestedStartAt)
+  const end = formatDateShort(permit.requestedEndAt)
+  const window =
+    start && end
+      ? `${start} → ${end}`
+      : (start ?? end ?? t("common.notRecorded"))
+  const date = applicationDate(permit)
+  const dateLabel = date
+    ? new Intl.DateTimeFormat(undefined, {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }).format(date)
+    : t("common.notRecorded")
+  const invoice = permit.invoice ?? null
+  const amount =
+    typeof invoice?.amount === "number"
+      ? invoice.amount
+      : typeof invoice?.totalAmount === "number"
+        ? invoice.totalAmount
+        : null
+  const canPay = (permit.status ?? "").toUpperCase() === "APPROVED_PENDING_PAYMENT"
+
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary/30 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0 space-y-1.5">
+        <div className="flex items-center gap-2 font-mono text-[10px] font-medium tracking-[0.22em] text-muted-foreground uppercase">
+          <span className="text-foreground/70">Permit</span>
+          <span className="text-foreground">{permit.id}</span>
+        </div>
+        <h3 className="truncate text-base font-semibold tracking-tight text-foreground">
+          {route ? routeLabel(route) : t("common.notRecorded")}
+        </h3>
+        <p className="truncate text-xs text-muted-foreground">
+          {formatPurpose(permit.purpose, t)} · {window}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-4 sm:gap-6">
+        <div className="hidden w-28 text-right sm:block">
+          <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+            {t("permits.appDate")}
+          </p>
+          <p className="mt-0.5 text-sm font-medium text-foreground">
+            {dateLabel}
+          </p>
+        </div>
+        <div className="flex w-32 justify-end">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ring-1 ring-inset",
+              STATUS_BADGE_CLASSES[tone]
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                STATUS_DOT_CLASSES[tone]
+              )}
+            />
+            {status}
+          </span>
+        </div>
+        <div className="flex w-36 justify-end">
+          {canPay && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => onPay(permit)}
+              className="gap-1.5 rounded-lg"
+            >
+              <CreditCard className="size-3.5" />
+              {t("permits.payNow")}
+              {amount !== null && (
+                <span className="font-mono">· {formatMzn(amount)}</span>
+              )}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ErrorPanel({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation()
+  return (
+    <Alert variant="destructive">
+      <AlertCircle />
+      <AlertTitle>{t("permits.roadClosure.pendingFailed")}</AlertTitle>
+      <AlertDescription>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onRetry}
+          className="mt-2 gap-2"
+        >
+          <RefreshCw className="size-3.5" />
+          {t("common.retry")}
+        </Button>
+      </AlertDescription>
+    </Alert>
+  )
+}
+
+function LoadingPanel() {
+  const { t } = useTranslation()
+  return (
+    <div className="flex h-48 items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-card text-sm text-muted-foreground">
+      <Spinner />
+      {t("permits.roadClosure.loadingPending")}
+    </div>
+  )
+}
+
 export default function Permits() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -452,6 +579,12 @@ export default function Permits() {
   const [selectedPermit, setSelectedPermit] = useState<RoadClosurePermit | null>(
     null
   )
+  const [payingPermit, setPayingPermit] = useState<RoadClosurePermit | null>(
+    null
+  )
+  const [appSearch, setAppSearch] = useState("")
+  const [appStatus, setAppStatus] = useState<"ALL" | PermitStatusKey>("ALL")
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
   const [form, setForm] = useState<RoadClosureForm>(() => initialForm())
 
   const routesQuery = useQuery({
@@ -461,24 +594,37 @@ export default function Permits() {
   })
 
   const reviewQuery = useQuery({
-    queryKey: ["road-closure-permits", MUNICIPALITY_ID, PERMIT_PHASES[0].status],
+    queryKey: ["road-closure-permits", MUNICIPALITY_ID, "PENDING_ADMIN_APPROVAL"],
     queryFn: () =>
-      listRoadClosurePermits(MUNICIPALITY_ID, PERMIT_PHASES[0].status),
-    enabled: !creating && !!MUNICIPALITY_ID,
-  })
-  const approvedQuery = useQuery({
-    queryKey: ["road-closure-permits", MUNICIPALITY_ID, PERMIT_PHASES[1].status],
-    queryFn: () =>
-      listRoadClosurePermits(MUNICIPALITY_ID, PERMIT_PHASES[1].status),
+      listRoadClosurePermits(MUNICIPALITY_ID, "PENDING_ADMIN_APPROVAL"),
     enabled: !creating && !!MUNICIPALITY_ID,
   })
   const paymentQuery = useQuery({
-    queryKey: ["road-closure-permits", MUNICIPALITY_ID, PERMIT_PHASES[2].status],
+    queryKey: [
+      "road-closure-permits",
+      MUNICIPALITY_ID,
+      "APPROVED_PENDING_PAYMENT",
+    ],
     queryFn: () =>
-      listRoadClosurePermits(MUNICIPALITY_ID, PERMIT_PHASES[2].status),
+      listRoadClosurePermits(MUNICIPALITY_ID, "APPROVED_PENDING_PAYMENT"),
     enabled: !creating && !!MUNICIPALITY_ID,
   })
-  const phaseQueries = [reviewQuery, approvedQuery, paymentQuery] as const
+  const issuedQuery = useQuery({
+    queryKey: ["road-closure-permits", MUNICIPALITY_ID, "ISSUED"],
+    queryFn: () => listRoadClosurePermits(MUNICIPALITY_ID, "ISSUED"),
+    enabled: !creating && !!MUNICIPALITY_ID,
+  })
+  const rejectedQuery = useQuery({
+    queryKey: ["road-closure-permits", MUNICIPALITY_ID, "REJECTED"],
+    queryFn: () => listRoadClosurePermits(MUNICIPALITY_ID, "REJECTED"),
+    enabled: !creating && !!MUNICIPALITY_ID,
+  })
+  const applicationQueries = [
+    reviewQuery,
+    paymentQuery,
+    issuedQuery,
+    rejectedQuery,
+  ] as const
 
   const detailQuery = useQuery({
     queryKey: ["municipal-route-detail", selectedRouteId],
@@ -551,20 +697,81 @@ export default function Permits() {
     createMutation.mutate()
   }
 
-  const phasePermits = useMemo(
-    () => phaseQueries.map((query) => query.data ?? []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [reviewQuery.data, approvedQuery.data, paymentQuery.data]
+  const issuedPermits = useMemo(
+    () => issuedQuery.data ?? [],
+    [issuedQuery.data]
   )
-  const totalPermits = phasePermits.reduce(
-    (sum, permits) => sum + permits.length,
-    0
-  )
-  const anyLoading = phaseQueries.some((q) => q.isLoading)
-  const allErrored = phaseQueries.every((q) => q.isError)
-  const defaultPhase: PermitPhaseKey =
-    PERMIT_PHASES.find((_phase, index) => phasePermits[index].length > 0)?.key ??
-    "review"
+
+  const allApplications = useMemo(() => {
+    const map = new Map<string, RoadClosurePermit>()
+    for (const list of [
+      reviewQuery.data,
+      paymentQuery.data,
+      issuedQuery.data,
+      rejectedQuery.data,
+    ]) {
+      for (const permit of list ?? []) map.set(permit.id, permit)
+    }
+    return [...map.values()].sort(
+      (a, b) =>
+        (applicationDate(b)?.getTime() ?? 0) -
+        (applicationDate(a)?.getTime() ?? 0)
+    )
+  }, [reviewQuery.data, paymentQuery.data, issuedQuery.data, rejectedQuery.data])
+
+  const filteredApplications = useMemo(() => {
+    const needle = appSearch.trim().toLowerCase()
+    const from = dateRange?.from ? startOfDay(dateRange.from) : null
+    const to = dateRange?.to
+      ? endOfDay(dateRange.to)
+      : dateRange?.from
+        ? endOfDay(dateRange.from)
+        : null
+    return allApplications.filter((permit) => {
+      if (
+        appStatus !== "ALL" &&
+        (permit.status ?? "").toUpperCase() !== appStatus
+      ) {
+        return false
+      }
+      if (needle) {
+        const route = permit.route as MunicipalRoute | undefined
+        const haystack = [
+          permit.id,
+          route ? routeLabel(route) : "",
+          permit.purpose,
+          permit.applicantName,
+          permit.status,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+        if (!haystack.includes(needle)) return false
+      }
+      if (from || to) {
+        const date = applicationDate(permit)
+        if (!date) return false
+        if (from && date.getTime() < from.getTime()) return false
+        if (to && date.getTime() > to.getTime()) return false
+      }
+      return true
+    })
+  }, [allApplications, appSearch, appStatus, dateRange])
+
+  const appsLoading = applicationQueries.some((q) => q.isLoading)
+  const appsAllErrored = applicationQueries.every((q) => q.isError)
+  const hasDateFilter = !!dateRange?.from
+  const dateRangeLabel = (() => {
+    if (!dateRange?.from) return t("permits.allDates")
+    const fmt = (date: Date) =>
+      new Intl.DateTimeFormat(undefined, {
+        day: "2-digit",
+        month: "short",
+      }).format(date)
+    return dateRange.to
+      ? `${fmt(dateRange.from)} – ${fmt(dateRange.to)}`
+      : fmt(dateRange.from)
+  })()
 
   if (!creating) {
     return (
@@ -579,133 +786,183 @@ export default function Permits() {
           </Alert>
         )}
 
-        {allErrored && (
-          <Alert variant="destructive">
-            <AlertCircle />
-            <AlertTitle>{t("permits.roadClosure.pendingFailed")}</AlertTitle>
-            <AlertDescription>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  phaseQueries.forEach((query) => void query.refetch())
-                }}
-                className="mt-2 gap-2"
-              >
-                <RefreshCw className="size-3.5" />
-                {t("common.retry")}
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {anyLoading && totalPermits === 0 ? (
-          <div className="flex h-64 items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-card text-sm text-muted-foreground">
-            <Spinner />
-            {t("permits.roadClosure.loadingPending")}
-          </div>
-        ) : totalPermits === 0 && !allErrored ? (
-          <Card>
-            <CardContent className="flex min-h-64 flex-col items-center justify-center gap-4 text-center">
-              <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                <FileText className="size-5" />
+        <Tabs defaultValue="permits" className="gap-5">
+          <TabsList variant="line" className="border-b border-border pb-1">
+            <TabsTrigger value="permits">
+              <BadgeCheck />
+              {t("permits.myPermits")}
+              <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground tabular-nums">
+                {issuedPermits.length}
               </span>
-              <div>
-                <h2 className="text-base font-semibold text-foreground">
-                  {t("permits.roadClosure.noPendingTitle")}
-                </h2>
-                <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                  {t("permits.roadClosure.noPendingDescription")}
-                </p>
+            </TabsTrigger>
+            <TabsTrigger value="applications">
+              <FileText />
+              {t("permits.myApplications")}
+              <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground tabular-nums">
+                {allApplications.length}
+              </span>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="permits" className="mt-0 space-y-4">
+            {issuedQuery.isError ? (
+              <ErrorPanel onRetry={() => void issuedQuery.refetch()} />
+            ) : issuedQuery.isLoading && issuedPermits.length === 0 ? (
+              <LoadingPanel />
+            ) : issuedPermits.length === 0 ? (
+              <Card>
+                <CardContent className="flex min-h-64 flex-col items-center justify-center gap-4 text-center">
+                  <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                    <BadgeCheck className="size-5" />
+                  </span>
+                  <div>
+                    <h2 className="text-base font-semibold text-foreground">
+                      {t("permits.myPermitsEmptyTitle")}
+                    </h2>
+                    <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                      {t("permits.myPermitsEmptyDescription")}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => navigate("/portal/permits?mode=new")}
+                    className="gap-2 rounded-lg bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+                  >
+                    <Plus className="size-4" />
+                    {t("shell.newApplication")}
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-3">
+                {issuedPermits.map((permit) => (
+                  <PermitCard
+                    key={permit.id}
+                    permit={permit}
+                    onSelect={setSelectedPermit}
+                  />
+                ))}
               </div>
-              <Button
-                type="button"
-                onClick={() => navigate("/portal/permits?mode=new")}
-                className="gap-2 rounded-lg bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
+            )}
+          </TabsContent>
+
+          <TabsContent value="applications" className="mt-0 space-y-4">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3">
+              <div className="relative min-w-48 flex-1">
+                <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={appSearch}
+                  onChange={(event) => setAppSearch(event.target.value)}
+                  placeholder={t("permits.applicationsSearch")}
+                  className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
+                />
+              </div>
+              <Select
+                value={appStatus}
+                onValueChange={(value) =>
+                  setAppStatus(value as "ALL" | PermitStatusKey)
+                }
               >
-                <Plus className="size-4" />
-                {t("shell.newApplication")}
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <Tabs defaultValue={defaultPhase} className="gap-4">
-            <TabsList variant="line" className="border-b border-border pb-1">
-              {PERMIT_PHASES.map((phase, index) => {
-                const Icon = phase.icon
-                const count = phasePermits[index].length
-                return (
-                  <TabsTrigger key={phase.key} value={phase.key}>
-                    <Icon />
-                    {t(phase.labelKey)}
-                    <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground tabular-nums">
-                      {count}
-                    </span>
-                  </TabsTrigger>
-                )
-              })}
-            </TabsList>
-            {PERMIT_PHASES.map((phase, index) => {
-              const permits = phasePermits[index]
-              const query = phaseQueries[index]
-              return (
-                <TabsContent
-                  key={phase.key}
-                  value={phase.key}
-                  className="mt-0 space-y-4"
-                >
-                  {query.isError ? (
-                    <Alert variant="destructive">
-                      <AlertCircle />
-                      <AlertTitle>
-                        {t("permits.roadClosure.pendingFailed")}
-                      </AlertTitle>
-                      <AlertDescription>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void query.refetch()}
-                          className="mt-2 gap-2"
-                        >
-                          <RefreshCw className="size-3.5" />
-                          {t("common.retry")}
-                        </Button>
-                      </AlertDescription>
-                    </Alert>
-                  ) : query.isLoading && permits.length === 0 ? (
-                    <div className="flex h-40 items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-card text-sm text-muted-foreground">
-                      <Spinner />
-                      {t("permits.roadClosure.loadingPending")}
-                    </div>
-                  ) : permits.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">
-                      {t("permits.roadClosure.phases.empty", {
-                        phase: t(phase.labelKey),
-                      })}
-                    </div>
-                  ) : (
-                    <div className="grid gap-3">
-                      {permits.map((permit) => (
-                        <PermitCard
-                          key={permit.id}
-                          permit={permit}
-                          onSelect={setSelectedPermit}
-                        />
-                      ))}
+                <SelectTrigger className="h-9 w-44 rounded-lg border-border bg-background text-sm shadow-none">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">{t("permits.statusAll")}</SelectItem>
+                  {PERMIT_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {t(`permits.statuses.${status}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={cn(
+                      "h-9 justify-start gap-2 rounded-lg px-3 text-sm font-normal",
+                      !hasDateFilter && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="size-4" />
+                    {dateRangeLabel}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-auto p-0">
+                  <Calendar
+                    mode="range"
+                    numberOfMonths={1}
+                    selected={dateRange}
+                    onSelect={setDateRange}
+                  />
+                  {hasDateFilter && (
+                    <div className="border-t border-border p-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => setDateRange(undefined)}
+                      >
+                        {t("permits.clearDates")}
+                      </Button>
                     </div>
                   )}
-                </TabsContent>
-              )
-            })}
-          </Tabs>
-        )}
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {appsAllErrored ? (
+              <ErrorPanel
+                onRetry={() =>
+                  applicationQueries.forEach((query) => void query.refetch())
+                }
+              />
+            ) : appsLoading && allApplications.length === 0 ? (
+              <LoadingPanel />
+            ) : allApplications.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">
+                {t("permits.noApplicationsYet")}
+              </div>
+            ) : filteredApplications.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center">
+                <p className="text-sm font-medium text-foreground">
+                  {t("permits.noApplicationsTitle")}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t("permits.noApplicationsDescription")}
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {filteredApplications.map((permit) => (
+                  <ApplicationRow
+                    key={permit.id}
+                    permit={permit}
+                    onPay={setPayingPermit}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
 
         <PermitCertificateDialog
           permit={selectedPermit}
           onOpenChange={(open) => {
             if (!open) setSelectedPermit(null)
+          }}
+        />
+        <PermitPaymentDialog
+          permit={payingPermit}
+          onOpenChange={(open) => {
+            if (!open) setPayingPermit(null)
+          }}
+          onPaid={() => {
+            void queryClient.invalidateQueries({
+              queryKey: ["road-closure-permits", MUNICIPALITY_ID],
+            })
           }}
         />
       </div>

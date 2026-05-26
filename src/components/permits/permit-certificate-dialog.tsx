@@ -147,7 +147,7 @@ export function PermitCertificateDialog({
 
   return (
     <Dialog open={permit !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[95vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("permits.roadClosure.certificateTitle")}</DialogTitle>
           <DialogDescription>
@@ -155,10 +155,10 @@ export function PermitCertificateDialog({
           </DialogDescription>
         </DialogHeader>
         {permit && (
-          <div className="flex justify-center py-2">
+          <div className="flex justify-center py-1">
             <div
               ref={certificateRef}
-              className="relative flex aspect-[1/1.414] w-full max-w-[460px] flex-col overflow-hidden bg-[#fdfcf6] text-foreground shadow-[0_30px_60px_-15px_rgba(15,23,42,0.25)] ring-1 ring-foreground/10"
+              className="relative flex w-full max-w-[400px] flex-col overflow-hidden bg-[#fdfcf6] text-foreground shadow-[0_30px_60px_-15px_rgba(15,23,42,0.25)] ring-1 ring-foreground/10"
             >
               <span
                 aria-hidden
@@ -180,7 +180,7 @@ export function PermitCertificateDialog({
                 className="pointer-events-none absolute top-1/2 left-1/2 size-72 -translate-x-1/2 -translate-y-1/2 object-contain opacity-[0.06]"
               />
 
-              <div className="relative flex flex-1 flex-col px-8 py-9 sm:px-10 sm:py-11">
+              <div className="relative flex flex-1 flex-col px-6 py-5 sm:px-9 sm:py-7">
                 <div className="flex flex-col items-center text-center">
                   <img
                     src="/maputo-logo.webp"
@@ -204,7 +204,7 @@ export function PermitCertificateDialog({
                   </p>
                 </div>
 
-                <div className="mt-6 text-center">
+                <div className="mt-5 text-center">
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     This permit certifies the authorization of a temporary
                     municipal road closure on the route:
@@ -214,7 +214,7 @@ export function PermitCertificateDialog({
                   </p>
                 </div>
 
-                <div className="mt-7 grid grid-cols-2 gap-x-6 gap-y-4 border-y border-primary/20 py-5">
+                <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-y border-primary/20 py-4">
                   <Field
                     label={t("permits.roadClosure.purpose")}
                     value={purpose}
@@ -239,14 +239,15 @@ export function PermitCertificateDialog({
                   </p>
                 )}
 
-                <div className="mt-auto flex items-end justify-between gap-6 pt-6">
+                <div className="mt-auto flex items-end justify-between gap-6 pt-5">
                   <div className="flex flex-col items-center">
                     <div className="rounded-md border border-primary/20 bg-white p-2 shadow-sm">
                       <QRCode
                         value={permit.id}
-                        size={72}
-                        bgColor="transparent"
-                        fgColor="currentColor"
+                        size={64}
+                        className="block h-auto w-16"
+                        bgColor="#ffffff"
+                        fgColor="#0f172a"
                         title={t("permits.roadClosure.qrPermitId", {
                           permitId: permit.id,
                         })}

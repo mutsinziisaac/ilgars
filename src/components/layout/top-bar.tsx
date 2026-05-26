@@ -1,4 +1,4 @@
-import { ArrowLeft, Bell, Plus, Search } from "lucide-react"
+import { ArrowLeft, Bell, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import {
   Link,
@@ -10,7 +10,6 @@ import {
 
 import { useAuth } from "@/components/auth/auth-context"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { formatDate } from "@/i18n/format"
 import { LanguageSwitcher } from "./language-switcher"
 import { findNavItem } from "./nav-config"
@@ -58,14 +57,6 @@ function PermitsTopBar() {
         </h1>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <div className="relative w-64">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder={t("common.searchPlatesReceipts")}
-            className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
-          />
-        </div>
         <LanguageSwitcher />
         <NotificationsButton />
         <Button
@@ -123,19 +114,9 @@ function DefaultTopBar() {
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        {!isFleet && (
-          <div className="relative w-64">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder={t("common.searchPlatesReceipts")}
-              className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
-            />
-          </div>
-        )}
         <LanguageSwitcher />
         <NotificationsButton />
-        {isFleet ? (
+        {isFleet && (
           <Button
             size="sm"
             onClick={() => navigate("/portal/fleet/new")}
@@ -143,15 +124,6 @@ function DefaultTopBar() {
           >
             <Plus />
             {t("fleet.addTruck")}
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            onClick={() => navigate("/portal/pay-charges?step=vehicle")}
-            className="rounded-lg bg-sidebar text-sidebar-foreground hover:bg-sidebar/90"
-          >
-            <Plus />
-            {t("shell.newTrip")}
           </Button>
         )}
       </div>
@@ -161,7 +133,6 @@ function DefaultTopBar() {
 
 function CreateTopBar() {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   const [params] = useSearchParams()
   const stepKey = (params.get("step") ??
     "logbook") as (typeof FLEET_STEP_LABELS)[number]
@@ -180,24 +151,8 @@ function CreateTopBar() {
         </h1>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <div className="relative w-64">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder={t("common.searchPlatesReceipts")}
-            className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
-          />
-        </div>
         <LanguageSwitcher />
         <NotificationsButton />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate("/portal/fleet")}
-          className="rounded-lg"
-        >
-          {t("common.saveExit")}
-        </Button>
       </div>
     </header>
   )
@@ -205,7 +160,6 @@ function CreateTopBar() {
 
 function PayChargesTopBar() {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   const [params] = useSearchParams()
   const stepKey = (params.get("step") ??
     "vehicle") as (typeof PAY_STEP_LABELS)[number]
@@ -224,24 +178,8 @@ function PayChargesTopBar() {
         </h1>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <div className="relative w-64">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder={t("common.searchPlatesReceipts")}
-            className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
-          />
-        </div>
         <LanguageSwitcher />
         <NotificationsButton />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate("/portal")}
-          className="rounded-lg"
-        >
-          {t("common.saveExit")}
-        </Button>
       </div>
     </header>
   )
@@ -271,14 +209,6 @@ function DetailTopBar({ vehicleId }: { vehicleId: string }) {
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        <div className="relative w-64">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder={t("common.searchPlatesReceipts")}
-            className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
-          />
-        </div>
         <LanguageSwitcher />
         <NotificationsButton />
       </div>

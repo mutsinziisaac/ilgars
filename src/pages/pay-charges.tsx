@@ -8,7 +8,6 @@ import {
   CreditCard,
   FileText,
   Map as MapIcon,
-  QrCode,
   Route as RouteIcon,
   Search,
   Smartphone,
@@ -16,6 +15,7 @@ import {
   Wallet,
 } from "lucide-react"
 import type { DateRange } from "react-day-picker"
+import QRCode from "react-qr-code"
 import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { useTranslation } from "react-i18next"
@@ -1336,7 +1336,16 @@ function ReceiptStep({
             </p>
           </div>
           <div className="relative mt-7 flex size-24 items-center justify-center rounded-full border border-border bg-background/90 shadow-sm">
-            <QrCode className="size-14 text-foreground" />
+            <QRCode
+              value={receipt.qrPayload}
+              size={64}
+              bgColor="transparent"
+              fgColor="currentColor"
+              title={t("payCharges.qrCodeTitle", {
+                receiptNumber: receipt.number,
+              })}
+              className="text-foreground"
+            />
           </div>
         </div>
       </Card>
