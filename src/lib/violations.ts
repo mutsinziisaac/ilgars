@@ -12,16 +12,12 @@ export function isOpenViolation(violation: MyFleetViolation): boolean {
 
 export function violationToneForList(openViolations: MyFleetViolation[]): ViolationTone {
   if (openViolations.length === 0) return "compliant"
-  const hasAvailable = openViolations.some(
-    (v) => (v.status ?? "").toUpperCase() === "AVAILABLE"
-  )
-  return hasAvailable ? "critical" : "warning"
+  return "critical"
 }
 
 export function violationStatusTone(status: string | null | undefined): ViolationTone {
   const upper = (status ?? "").toUpperCase()
-  if (upper === "AVAILABLE") return "critical"
-  if (upper === "RESPONDING") return "warning"
+  if (upper === "AVAILABLE" || upper === "RESPONDING") return "critical"
   return "compliant"
 }
 

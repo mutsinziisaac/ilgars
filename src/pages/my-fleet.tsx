@@ -37,6 +37,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import {
   Table,
@@ -275,10 +282,26 @@ function buildFleetRows(items: MyFleetItem[], t: ReturnType<typeof useTranslatio
     .sort((a, b) => a.plate.localeCompare(b.plate))
 }
 
+type TripStatusFilter = "all" | "active" | "settlement" | "idle"
+
+const TRIP_STATUS_FILTERS: { value: TripStatusFilter; labelKey: string }[] = [
+  { value: "all", labelKey: "fleet.statusFilter.all" },
+  { value: "active", labelKey: "fleet.activeTrip" },
+  { value: "settlement", labelKey: "fleet.settlementRequired" },
+  { value: "idle", labelKey: "fleet.noActiveTrip" },
+]
+
+function tripStatusKey(row: FleetRow): TripStatusFilter {
+  if (row.tripTone === "trip") return "active"
+  if (row.tripTone === "critical") return "settlement"
+  return "idle"
+}
+
 export default function MyFleet() {
   const { t } = useTranslation()
   const [view, setView] = useState<"table" | "map">("table")
   const [query, setQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState<TripStatusFilter>("all")
   const fleetQuery = useQuery({
     queryKey: ["myfleet", "ACTIVE"],
     queryFn: () => getMyFleetVehicles("ACTIVE"),
@@ -289,9 +312,14 @@ export default function MyFleet() {
   )
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((row) => row.searchText.includes(q))
-  }, [query, rows])
+    return rows.filter((row) => {
+      if (statusFilter !== "all" && tripStatusKey(row) !== statusFilter) {
+        return false
+      }
+      if (q && !row.searchText.includes(q)) return false
+      return true
+    })
+  }, [query, rows, statusFilter])
 
   return (
     <div className="space-y-4">
@@ -305,6 +333,24 @@ export default function MyFleet() {
             className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
           />
         </div>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => setStatusFilter(value as TripStatusFilter)}
+        >
+          <SelectTrigger
+            className="h-9 w-44 rounded-lg border-border bg-background text-sm shadow-none"
+            aria-label={t("fleet.statusFilter.label")}
+          >
+            <SelectValue placeholder={t("fleet.statusFilter.label")} />
+          </SelectTrigger>
+          <SelectContent>
+            {TRIP_STATUS_FILTERS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {t(option.labelKey)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Badge
           variant="secondary"
           className="bg-primary/10 px-2.5 py-1 text-xs text-primary"
@@ -337,7 +383,7 @@ export default function MyFleet() {
       {view === "table" ? (
         <FleetTable
           rows={filtered}
-          query={query}
+          filtersActive={query.trim() !== "" || statusFilter !== "all"}
           isLoading={fleetQuery.isLoading}
           error={fleetQuery.error}
           onRetry={() => void fleetQuery.refetch()}
@@ -351,13 +397,13 @@ export default function MyFleet() {
 
 function FleetTable({
   rows,
-  query,
+  filtersActive,
   isLoading,
   error,
   onRetry,
 }: {
   rows: FleetRow[]
-  query: string
+  filtersActive: boolean
   isLoading: boolean
   error: unknown
   onRetry: () => void
@@ -424,7 +470,7 @@ function FleetTable({
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
-                  {query.trim() ? t("fleet.noTrucksSearch") : t("fleet.noTrucksYet")}
+                  {filtersActive ? t("fleet.noTrucksSearch") : t("fleet.noTrucksYet")}
                 </TableCell>
               </TableRow>
             ) : (

@@ -804,6 +804,11 @@ function ViolationsCard({
         <ul className="divide-y divide-border border-t border-border">
           {visible.map((violation) => {
             const amount = formatViolationAmount(violation)
+            const upperStatus = (violation.status ?? "").toUpperCase()
+            // Don't surface "available"/"responding" as a status — only show
+            // terminal statuses like resolved/released.
+            const showStatus =
+              upperStatus !== "AVAILABLE" && upperStatus !== "RESPONDING"
             const tone = violationStatusTone(violation.status)
             const assignment = violation.assignment ?? null
             const truckLoc = violation.truckLocation ?? null
@@ -813,9 +818,11 @@ function ViolationsCard({
                   <p className="text-sm font-medium text-foreground">
                     {violationCodeLabel(violation.code ?? violation.reason, t)}
                   </p>
-                  <StatusPill tone={tone}>
-                    {violationStatusLabel(violation.status, t)}
-                  </StatusPill>
+                  {showStatus && (
+                    <StatusPill tone={tone}>
+                      {violationStatusLabel(violation.status, t)}
+                    </StatusPill>
+                  )}
                 </div>
                 <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-[12px] sm:grid-cols-3">
                   {amount && (
