@@ -413,6 +413,14 @@ export const ptMZ = {
       purpose: "Finalidade",
       requestedStartAt: "Início",
       requestedEndAt: "Fim",
+      closureType: "Tipo de encerramento",
+      closureTypeDescription:
+        "A via será totalmente encerrada ou parcialmente, com acesso controlado?",
+      closureFull: "Encerramento total",
+      closureFullDescription: "Toda a via fica encerrada a todo o trânsito.",
+      closurePartial: "Encerramento parcial",
+      closurePartialDescription:
+        "Uma ou mais faixas permanecem abertas com acesso controlado.",
       conditions: "Condições",
       conditionsPlaceholder:
         "Manter sinalização, desvios, controlo de acesso...",
@@ -476,6 +484,12 @@ export const ptMZ = {
       APPROVED_PENDING_PAYMENT: "Aguarda pagamento",
       ISSUED: "Emitida",
       REJECTED: "Rejeitada",
+    },
+    flow: {
+      review: "Revisão",
+      payment: "Pagamento",
+      issued: "Emitida",
+      rejected: "Rejeitada",
     },
     payment: {
       title: "Pagar licença de encerramento",

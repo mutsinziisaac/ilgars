@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react"
+import { Fragment, useMemo, useState, type FormEvent } from "react"
 import { endOfDay, startOfDay } from "date-fns"
 import type { DateRange } from "react-day-picker"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -7,15 +7,19 @@ import {
   AlertCircle,
   ArrowLeft,
   BadgeCheck,
+  Ban,
   CalendarIcon,
+  Check,
   Clock,
   CreditCard,
+  MoveHorizontal,
   FileText,
   MapPin,
   Plus,
   RefreshCw,
   Route as RouteIcon,
   Search,
+  X,
 } from "lucide-react"
 import { toast } from "sonner"
 import { useTranslation } from "react-i18next"
@@ -67,8 +71,11 @@ import {
 } from "@/lib/trips-api"
 import { cn } from "@/lib/utils"
 
+type ClosureScope = "FULL" | "PARTIAL"
+
 type RoadClosureForm = {
   purpose: RoadClosurePurpose
+  closureType: ClosureScope
   requestedStartAt: string
   requestedEndAt: string
   conditions: string
@@ -120,6 +127,7 @@ function applicationDate(permit: RoadClosurePermit): Date | null {
 function initialForm(): RoadClosureForm {
   return {
     purpose: "CONSTRUCTION",
+    closureType: "FULL",
     requestedStartAt: "",
     requestedEndAt: "",
     conditions: "",
@@ -440,6 +448,112 @@ function PermitCard({
   )
 }
 
+function StatusFlow({
+  status,
+  t,
+}: {
+  status: string | undefined
+  t: TFunction
+}) {
+  const key = (status ?? "").toUpperCase()
+  const rejected = key === "REJECTED"
+  const issued = key === "ISSUED"
+  const steps = [
+    { key: "PENDING_ADMIN_APPROVAL", label: t("permits.flow.review") },
+    { key: "APPROVED_PENDING_PAYMENT", label: t("permits.flow.payment") },
+    { key: "ISSUED", label: t("permits.flow.issued") },
+  ]
+  const matched = steps.findIndex((step) => step.key === key)
+  const currentIndex = rejected || matched < 0 ? 0 : matched
+  const tone = statusTone(status)
+
+  return (
+    <>
+      {/* Mobile: compact status badge */}
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ring-1 ring-inset md:hidden",
+          STATUS_BADGE_CLASSES[tone]
+        )}
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            STATUS_DOT_CLASSES[tone]
+          )}
+        />
+        {permitStatusLabel(status, t)}
+      </span>
+
+      {/* Desktop: status flow */}
+      <div className="hidden items-start md:flex">
+        {steps.map((step, index) => {
+          const complete =
+            !rejected && (index < currentIndex || (index === currentIndex && issued))
+          const current = !rejected && index === currentIndex && !issued
+          const stepRejected = rejected && index === 0
+          const upcoming = !complete && !current && !stepRejected
+          const connectorActive = !rejected && currentIndex >= index
+
+          return (
+            <Fragment key={step.key}>
+              {index > 0 && (
+                <span
+                  aria-hidden
+                  className="relative mt-[13px] h-0.5 w-7 overflow-hidden rounded-full bg-border lg:w-12"
+                >
+                  <span
+                    className={cn(
+                      "absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-primary to-primary/70 transition-all duration-500",
+                      connectorActive ? "w-full" : "w-0"
+                    )}
+                  />
+                </span>
+              )}
+              <div className="flex w-16 flex-col items-center gap-2">
+                <span className="relative flex size-7 items-center justify-center">
+                  <span
+                    className={cn(
+                      "relative flex size-7 items-center justify-center rounded-full text-[11px] font-semibold ring-1 ring-inset transition-all duration-300",
+                      complete &&
+                        "bg-gradient-to-br from-primary to-primary/80 text-primary-foreground ring-primary/40 shadow-sm shadow-primary/30",
+                      current &&
+                        "bg-primary/10 text-primary ring-2 ring-primary shadow-sm shadow-primary/20",
+                      stepRejected &&
+                        "bg-gradient-to-br from-destructive to-destructive/80 text-white ring-destructive/40 shadow-sm shadow-destructive/30",
+                      upcoming && "bg-muted text-muted-foreground/50 ring-border"
+                    )}
+                  >
+                    {complete ? (
+                      <Check className="size-3.5" strokeWidth={3} />
+                    ) : stepRejected ? (
+                      <X className="size-3.5" strokeWidth={3} />
+                    ) : (
+                      index + 1
+                    )}
+                  </span>
+                </span>
+                <span
+                  className={cn(
+                    "text-[10px] font-semibold tracking-wide whitespace-nowrap transition-colors",
+                    complete && "text-primary",
+                    current && "text-foreground",
+                    stepRejected && "text-destructive",
+                    upcoming && "text-muted-foreground/60"
+                  )}
+                >
+                  {stepRejected ? t("permits.flow.rejected") : step.label}
+                </span>
+              </div>
+            </Fragment>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
 function ApplicationRow({
   permit,
   onPay,
@@ -449,8 +563,6 @@ function ApplicationRow({
 }) {
   const { t } = useTranslation()
   const route = permit.route as MunicipalRoute | undefined
-  const tone = statusTone(permit.status)
-  const status = permitStatusLabel(permit.status, t)
   const start = formatDateShort(permit.requestedStartAt)
   const end = formatDateShort(permit.requestedEndAt)
   const window =
@@ -488,47 +600,29 @@ function ApplicationRow({
           {formatPurpose(permit.purpose, t)} · {window}
         </p>
       </div>
+      <StatusFlow status={permit.status} t={t} />
       <div className="flex shrink-0 items-center gap-4 sm:gap-6">
-        <div className="hidden w-28 text-right sm:block">
+        {canPay && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => onPay(permit)}
+            className="gap-1.5 rounded-lg"
+          >
+            <CreditCard className="size-3.5" />
+            {t("permits.payNow")}
+            {amount !== null && (
+              <span className="font-mono">· {formatMzn(amount)}</span>
+            )}
+          </Button>
+        )}
+        <div className="text-right">
           <p className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
             {t("permits.appDate")}
           </p>
           <p className="mt-0.5 text-sm font-medium text-foreground">
             {dateLabel}
           </p>
-        </div>
-        <div className="flex w-32 justify-end">
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ring-1 ring-inset",
-              STATUS_BADGE_CLASSES[tone]
-            )}
-          >
-            <span
-              aria-hidden
-              className={cn(
-                "size-1.5 shrink-0 rounded-full",
-                STATUS_DOT_CLASSES[tone]
-              )}
-            />
-            {status}
-          </span>
-        </div>
-        <div className="flex w-36 justify-end">
-          {canPay && (
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => onPay(permit)}
-              className="gap-1.5 rounded-lg"
-            >
-              <CreditCard className="size-3.5" />
-              {t("permits.payNow")}
-              {amount !== null && (
-                <span className="font-mono">· {formatMzn(amount)}</span>
-              )}
-            </Button>
-          )}
         </div>
       </div>
     </div>
@@ -1235,6 +1329,92 @@ export default function Permits() {
                     }
                   />
                 </div>
+
+                <Field>
+                  <FieldLabel>
+                    {t("permits.roadClosure.closureType")}
+                  </FieldLabel>
+                  <FieldDescription>
+                    {t("permits.roadClosure.closureTypeDescription")}
+                  </FieldDescription>
+                  <div
+                    role="radiogroup"
+                    className="mt-2 grid gap-3 sm:grid-cols-2"
+                  >
+                    {(
+                      [
+                        {
+                          value: "FULL" as ClosureScope,
+                          icon: Ban,
+                          title: t("permits.roadClosure.closureFull"),
+                          description: t(
+                            "permits.roadClosure.closureFullDescription"
+                          ),
+                        },
+                        {
+                          value: "PARTIAL" as ClosureScope,
+                          icon: MoveHorizontal,
+                          title: t("permits.roadClosure.closurePartial"),
+                          description: t(
+                            "permits.roadClosure.closurePartialDescription"
+                          ),
+                        },
+                      ] as const
+                    ).map((option) => {
+                      const selected = form.closureType === option.value
+                      const Icon = option.icon
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          onClick={() =>
+                            setForm((current) => ({
+                              ...current,
+                              closureType: option.value,
+                            }))
+                          }
+                          className={cn(
+                            "group relative flex items-start gap-3 rounded-xl border p-4 text-left transition-all",
+                            selected
+                              ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                              : "border-border bg-card hover:border-primary/40 hover:bg-muted/40"
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "flex size-9 shrink-0 items-center justify-center rounded-lg transition-colors",
+                              selected
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-muted-foreground group-hover:text-foreground"
+                            )}
+                          >
+                            <Icon className="size-4" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-semibold text-foreground">
+                              {option.title}
+                            </span>
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                              {option.description}
+                            </span>
+                          </span>
+                          <span
+                            className={cn(
+                              "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border"
+                            )}
+                          >
+                            {selected && <Check className="size-3" strokeWidth={3} />}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </Field>
 
                 <Field>
                   <FieldLabel htmlFor="closure-conditions">
