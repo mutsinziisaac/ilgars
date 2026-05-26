@@ -405,6 +405,14 @@ export const en = {
       purpose: "Purpose",
       requestedStartAt: "Start",
       requestedEndAt: "End",
+      closureType: "Closure type",
+      closureTypeDescription:
+        "Will the road be fully closed, or partially closed with managed access?",
+      closureFull: "Full closure",
+      closureFullDescription: "The entire road is closed to all traffic.",
+      closurePartial: "Partial closure",
+      closurePartialDescription:
+        "One or more lanes stay open with managed access.",
       conditions: "Conditions",
       conditionsPlaceholder: "Maintain signage, diversions, access control...",
       conditionsDescription:
@@ -466,6 +474,12 @@ export const en = {
       APPROVED_PENDING_PAYMENT: "Awaiting payment",
       ISSUED: "Issued",
       REJECTED: "Rejected",
+    },
+    flow: {
+      review: "Review",
+      payment: "Payment",
+      issued: "Issued",
+      rejected: "Rejected",
     },
     payment: {
       title: "Pay road closure permit",

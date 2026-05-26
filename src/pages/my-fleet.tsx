@@ -23,7 +23,9 @@ import {
   useMapsLibrary,
 } from "@vis.gl/react-google-maps"
 
-import fleetTruckIcon from "@/assets/fleet-truck.png"
+import fleetTruckGreen from "@/assets/fleet-truck-green.png"
+import fleetTruckGrey from "@/assets/fleet-truck-grey.png"
+import fleetTruckRed from "@/assets/fleet-truck-red.png"
 import { formatCurrencyMzn, formatDateValue } from "@/i18n/format"
 import { GoogleMapsBoundary } from "@/components/maps/google-maps-boundary"
 import { StatusPill } from "@/components/fleet/status-pill"
@@ -80,22 +82,12 @@ import {
 import { useReverseGeocode } from "@/lib/reverse-geocode"
 import { cn } from "@/lib/utils"
 
-const EXCLAMATION_GLYPH = `<rect x='45.25' y='4.5' width='1.5' height='5' rx='0.75' fill='#ffffff'/><circle cx='46' cy='11.4' r='0.9' fill='#ffffff'/>`
-const CHECK_GLYPH = `<path d='M42.6 8.2 L45.2 10.9 L49.4 5.7' stroke='#ffffff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' fill='none'/>`
-const PLAY_GLYPH = `<path d='M44 4.6 L50 8 L44 11.4 Z' fill='#ffffff'/>`
-const DOT_GLYPH = `<circle cx='46' cy='8' r='2' fill='#ffffff'/>`
-
-function makeBadgeUrl(fill: string, glyph: string) {
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='56' height='42' viewBox='0 0 56 42'><g filter='drop-shadow(0 1px 1.5px rgba(0,0,0,0.3))'><circle cx='46' cy='8' r='8' fill='#ffffff'/><circle cx='46' cy='8' r='6.5' fill='${fill}'/>${glyph}</g></svg>`
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
-}
-
-const STATUS_BADGE_BY_TONE: Record<FleetRow["tripTone"], string> = {
-  compliant: makeBadgeUrl("#16a34a", CHECK_GLYPH),
-  trip: makeBadgeUrl("#16a34a", PLAY_GLYPH),
-  neutral: makeBadgeUrl("#64748b", DOT_GLYPH),
-  warning: makeBadgeUrl("#d97706", EXCLAMATION_GLYPH),
-  critical: makeBadgeUrl("#dc2626", EXCLAMATION_GLYPH),
+const TRUCK_ICON_BY_TONE: Record<FleetRow["tripTone"], string> = {
+  trip: fleetTruckGreen,
+  compliant: fleetTruckGreen,
+  neutral: fleetTruckGrey,
+  warning: fleetTruckRed,
+  critical: fleetTruckRed,
 }
 
 type FleetAction = "pay" | "topUp"
@@ -813,14 +805,7 @@ function FleetTruckMarker({
   const lastSeenValue = row.lastSeenAt ?? row.observedAt
   const icon = markerLib
     ? {
-        url: fleetTruckIcon,
-        scaledSize: new google.maps.Size(56, 42),
-        anchor: new google.maps.Point(28, 32),
-      }
-    : undefined
-  const badgeIcon = markerLib
-    ? {
-        url: STATUS_BADGE_BY_TONE[row.tripTone],
+        url: TRUCK_ICON_BY_TONE[row.tripTone],
         scaledSize: new google.maps.Size(56, 42),
         anchor: new google.maps.Point(28, 32),
       }
@@ -837,14 +822,6 @@ function FleetTruckMarker({
           onToggle(row.id)
         }}
       />
-      {badgeIcon && (
-        <Marker
-          position={position}
-          icon={badgeIcon}
-          clickable={false}
-          zIndex={9999}
-        />
-      )}
       {isOpen && (
         <InfoWindow position={position} onCloseClick={() => onToggle(null)}>
           <div className="w-64 space-y-3 p-0.5">
