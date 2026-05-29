@@ -462,14 +462,14 @@ export default function PayCharges() {
   return (
     <div
       className={cn(
-        "gap-8 pt-2 pb-20",
+        "pt-2 pb-20",
         step === "processing" || step === "receipt" || step === "submitted"
-          ? "mx-auto flex max-w-3xl flex-col"
-          : "grid grid-cols-[220px_minmax(0,1fr)_320px]"
+          ? "mx-auto flex max-w-3xl flex-col gap-8"
+          : "flex flex-col gap-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)_320px] lg:gap-8"
       )}
     >
       {step !== "processing" && step !== "receipt" && step !== "submitted" && (
-        <aside className="sticky top-20 self-start">
+        <aside className="lg:sticky lg:top-20 lg:self-start">
           <VerticalStepper
             steps={steps}
             currentKey={step}
@@ -554,7 +554,7 @@ export default function PayCharges() {
       </main>
 
       {step !== "processing" && step !== "receipt" && step !== "submitted" && (
-        <aside className="sticky top-20 self-start">
+        <aside className="lg:sticky lg:top-20 lg:self-start">
           <TripSummary
             form={form}
             category={weightCategory}

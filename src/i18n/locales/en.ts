@@ -79,6 +79,8 @@ export const en = {
     transporterAccount: "Transporter account",
     signOut: "Sign out",
     notifications: "Notifications",
+    openMenu: "Open menu",
+    menu: "Menu",
     page: "Page",
     greeting: "Good afternoon, {{name}}",
     fleetMeta:
