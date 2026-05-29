@@ -32,7 +32,7 @@ export function LanguageSwitcher({
           size="sm"
           aria-label={t("language.select")}
           className={cn(
-            "h-9 gap-1.5 rounded-lg px-2.5 text-xs font-semibold tracking-wide uppercase",
+            "h-9 gap-1.5 rounded-lg px-2.5 text-xs font-semibold tracking-wide uppercase max-lg:h-11",
             variant === "ghost" && "border-transparent bg-transparent",
             className
           )}

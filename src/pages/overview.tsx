@@ -140,7 +140,7 @@ function FleetAtAGlance() {
         </NavLink>
       </div>
 
-      <div className="grid grid-cols-[1.1fr_1.6fr_1fr_1.4fr_auto] items-center gap-x-4 px-5 pb-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+      <div className="hidden grid-cols-[1.1fr_1.6fr_1fr_1.4fr_auto] items-center gap-x-4 px-5 pb-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase lg:grid">
         <span>{t("common.plate")}</span>
         <span>{t("common.class")}</span>
         <span>{t("common.status")}</span>
@@ -148,7 +148,8 @@ function FleetAtAGlance() {
         <span />
       </div>
 
-      <ul className="divide-y divide-border border-t border-border">
+      {/* Desktop: table rows */}
+      <ul className="hidden divide-y divide-border border-t border-border lg:block">
         {FLEET.map((truck) => (
           <li
             key={truck.plate}
@@ -168,6 +169,31 @@ function FleetAtAGlance() {
             >
               {t("overview.open")}
               <ArrowUpRight className="size-3" />
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+
+      {/* Mobile: stacked cards */}
+      <ul className="space-y-3 border-t border-border p-4 lg:hidden">
+        {FLEET.map((truck) => (
+          <li key={truck.plate}>
+            <NavLink
+              to="/portal/fleet"
+              className="flex flex-col gap-2 rounded-lg border border-border p-3 transition-colors hover:border-primary/40 hover:bg-muted/40"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium tracking-wide text-foreground">
+                  {truck.plate}
+                </span>
+                <StatusPill status={truck.status} />
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {truck.class}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t("overview.activeTrip")}: {truck.trip ?? "—"}
+              </span>
             </NavLink>
           </li>
         ))}

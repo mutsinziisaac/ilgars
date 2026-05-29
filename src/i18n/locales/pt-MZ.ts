@@ -81,6 +81,8 @@ export const ptMZ = {
     transporterAccount: "Conta do transportador",
     signOut: "Terminar sessão",
     notifications: "Notificações",
+    openMenu: "Abrir menu",
+    menu: "Menu",
     page: "Página",
     greeting: "Boa tarde, {{name}}",
     fleetMeta:

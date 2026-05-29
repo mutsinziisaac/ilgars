@@ -587,7 +587,7 @@ function ApplicationRow({
   const canPay = (permit.status ?? "").toUpperCase() === "APPROVED_PENDING_PAYMENT"
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary/30 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary/30 md:flex-row md:items-center md:justify-between">
       <div className="min-w-0 space-y-1.5">
         <div className="flex items-center gap-2 font-mono text-[10px] font-medium tracking-[0.22em] text-muted-foreground uppercase">
           <span className="text-foreground/70">Permit</span>
@@ -601,7 +601,7 @@ function ApplicationRow({
         </p>
       </div>
       <StatusFlow status={permit.status} t={t} />
-      <div className="flex shrink-0 items-center gap-4 sm:gap-6">
+      <div className="flex shrink-0 items-center gap-4 md:gap-6">
         {canPay && (
           <Button
             type="button"
@@ -1209,7 +1209,7 @@ export default function Permits() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="h-[360px] overflow-hidden rounded-xl border border-border bg-muted/20">
+              <div className="h-[280px] overflow-hidden rounded-xl border border-border bg-muted/20 sm:h-[360px]">
                 {detailQuery.isFetching && !selectedRoute ? (
                   <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
                     <Spinner />

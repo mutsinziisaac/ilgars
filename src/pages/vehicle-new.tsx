@@ -243,8 +243,8 @@ export default function VehicleNew() {
   }
 
   return (
-    <div className="grid grid-cols-[220px_minmax(0,1fr)_320px] gap-8 pt-2 pb-20">
-      <aside className="sticky top-20 self-start">
+    <div className="flex flex-col gap-6 pt-2 pb-20 xl:grid xl:grid-cols-[220px_minmax(0,1fr)_320px] xl:gap-8">
+      <aside className="xl:sticky xl:top-20 xl:self-start">
         <VerticalStepper
             steps={STEPS.map((item) => ({
               ...item,
@@ -253,6 +253,7 @@ export default function VehicleNew() {
             }))}
           currentKey={step}
           onJump={(k) => goTo(k)}
+          desktopBreakpoint="xl"
         />
       </aside>
 
@@ -282,7 +283,7 @@ export default function VehicleNew() {
         )}
       </div>
 
-      <aside className="sticky top-20 flex flex-col gap-4 self-start">
+      <aside className="order-last flex flex-col gap-4 xl:order-none xl:sticky xl:top-20 xl:self-start">
         <LivePreview form={form} />
         {form.mvrLocked && <SourceVerifiedNote />}
       </aside>

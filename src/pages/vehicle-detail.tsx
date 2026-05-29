@@ -16,6 +16,7 @@ import { toPng } from "html-to-image"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { DataCard, DataCardField } from "@/components/ui/data-card"
 import {
   Dialog,
   DialogContent,
@@ -661,7 +662,7 @@ function TripsCard({
 
   return (
     <>
-      <section className="flex flex-col overflow-x-auto rounded-xl border border-border bg-card">
+      <section className="flex flex-col rounded-xl border border-border bg-card lg:overflow-x-auto">
         <div className="flex items-center justify-between gap-4 px-5 pt-4 pb-2">
           <h3 className="text-sm font-semibold tracking-tight text-foreground">
             {t("vehicleDetail.trips")}
@@ -670,7 +671,7 @@ function TripsCard({
             {t("vehicleDetail.total", { count: trips.length })}
           </span>
         </div>
-        <div className="grid min-w-[1040px] grid-cols-[1.35fr_0.8fr_0.8fr_0.75fr_0.75fr_0.7fr_0.95fr_0.7fr_1.2fr] items-center gap-x-4 border-t border-border px-5 py-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+        <div className="hidden min-w-[1040px] grid-cols-[1.35fr_0.8fr_0.8fr_0.75fr_0.75fr_0.7fr_0.95fr_0.7fr_1.2fr] items-center gap-x-4 border-t border-border px-5 py-2 text-[10px] font-medium tracking-widest text-muted-foreground uppercase lg:grid">
           <span>{t("vehicleDetail.tripReason")}</span>
           <span>{t("common.status")}</span>
           <span>{t("vehicleDetail.billing")}</span>
@@ -704,56 +705,68 @@ function TripsCard({
             {t("vehicleDetail.noTripsRecord")}
           </div>
         ) : (
-          <ul className="divide-y divide-border border-t border-border">
-            {visibleTrips.map((trip, index) => (
-              <li
-                key={`${trip.id}-${index}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelectedTrip(trip)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault()
-                    setSelectedTrip(trip)
-                  }
-                }}
-                className="grid min-w-[1040px] cursor-pointer grid-cols-[1.35fr_0.8fr_0.8fr_0.75fr_0.75fr_0.7fr_0.95fr_0.7fr_1.2fr] items-center gap-x-4 px-5 py-3 outline-none hover:bg-muted/40 focus-visible:bg-muted/40"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-xs font-medium text-foreground">
-                    {trip.reason}
+          <>
+            {/* Desktop: table rows */}
+            <ul className="hidden divide-y divide-border border-t border-border lg:block">
+              {visibleTrips.map((trip, index) => (
+                <li
+                  key={`${trip.id}-${index}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedTrip(trip)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      setSelectedTrip(trip)
+                    }
+                  }}
+                  className="grid min-w-[1040px] cursor-pointer grid-cols-[1.35fr_0.8fr_0.8fr_0.75fr_0.75fr_0.7fr_0.95fr_0.7fr_1.2fr] items-center gap-x-4 px-5 py-3 outline-none hover:bg-muted/40 focus-visible:bg-muted/40"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-medium text-foreground">
+                      {trip.reason}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                      {trip.creationSource}
+                    </span>
                   </span>
-                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                    {trip.creationSource}
+                  <span className="text-xs text-foreground">
+                    {statusLabel(trip.status)}
                   </span>
-                </span>
-                <span className="text-xs text-foreground">
-                  {statusLabel(trip.status)}
-                </span>
-                <span className="text-xs text-foreground">
-                  {statusLabel(trip.billingStatus)}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {tripDateLabel(tripStartDate(trip))}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {tripDateLabel(tripEndDate(trip))}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {t("vehicleDetail.feeCount", { count: trip.feeCount })}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {formatAmount(trip.outstandingFeeAmount)}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {tripDuration(trip)}
-                </span>
-                <span className="min-w-0 truncate text-xs text-muted-foreground">
-                  {tripPaymentMode(trip)} · {trip.createdBy}
-                </span>
-              </li>
-            ))}
-          </ul>
+                  <span className="text-xs text-foreground">
+                    {statusLabel(trip.billingStatus)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {tripDateLabel(tripStartDate(trip))}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {tripDateLabel(tripEndDate(trip))}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("vehicleDetail.feeCount", { count: trip.feeCount })}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {formatAmount(trip.outstandingFeeAmount)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {tripDuration(trip)}
+                  </span>
+                  <span className="min-w-0 truncate text-xs text-muted-foreground">
+                    {tripPaymentMode(trip)} · {trip.createdBy}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            {/* Mobile: stacked cards */}
+            <ul className="space-y-3 border-t border-border p-4 lg:hidden">
+              {visibleTrips.map((trip, index) => (
+                <li key={`${trip.id}-${index}`}>
+                  <TripCard trip={trip} onSelect={() => setSelectedTrip(trip)} />
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </section>
       <TripCertificateDialog
@@ -764,6 +777,56 @@ function TripsCard({
         }}
       />
     </>
+  )
+}
+
+function TripCard({
+  trip,
+  onSelect,
+}: {
+  trip: VehicleTrip
+  onSelect: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <DataCard onActivate={onSelect}>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-foreground">
+          {trip.reason}
+        </p>
+        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+          {trip.creationSource}
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <DataCardField label={t("common.status")}>
+          {statusLabel(trip.status)}
+        </DataCardField>
+        <DataCardField label={t("vehicleDetail.billing")}>
+          {statusLabel(trip.billingStatus)}
+        </DataCardField>
+        <DataCardField label={t("vehicleDetail.start")}>
+          {tripDateLabel(tripStartDate(trip))}
+        </DataCardField>
+        <DataCardField label={t("vehicleDetail.end")}>
+          {tripDateLabel(tripEndDate(trip))}
+        </DataCardField>
+        <DataCardField label={t("vehicleDetail.fees")}>
+          {t("vehicleDetail.feeCount", { count: trip.feeCount })}
+        </DataCardField>
+        <DataCardField label={t("vehicleDetail.outstanding")}>
+          {formatAmount(trip.outstandingFeeAmount)}
+        </DataCardField>
+        <DataCardField label={t("common.duration")}>
+          {tripDuration(trip)}
+        </DataCardField>
+        <DataCardField label={t("vehicleDetail.payment")}>
+          <span className="truncate">
+            {tripPaymentMode(trip)} · {trip.createdBy}
+          </span>
+        </DataCardField>
+      </div>
+    </DataCard>
   )
 }
 

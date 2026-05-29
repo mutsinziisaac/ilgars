@@ -31,6 +31,7 @@ import { GoogleMapsBoundary } from "@/components/maps/google-maps-boundary"
 import { StatusPill } from "@/components/fleet/status-pill"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { DataCard, DataCardField } from "@/components/ui/data-card"
 import {
   Dialog,
   DialogContent,
@@ -316,7 +317,7 @@ export default function MyFleet() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-3">
-        <div className="relative w-80 max-w-full">
+        <div className="relative w-full sm:w-80">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
@@ -330,7 +331,7 @@ export default function MyFleet() {
           onValueChange={(value) => setStatusFilter(value as TripStatusFilter)}
         >
           <SelectTrigger
-            className="h-9 w-44 rounded-lg border-border bg-background text-sm shadow-none"
+            className="h-9 w-full rounded-lg border-border bg-background text-sm shadow-none sm:w-44"
             aria-label={t("fleet.statusFilter.label")}
           >
             <SelectValue placeholder={t("fleet.statusFilter.label")} />
@@ -349,7 +350,7 @@ export default function MyFleet() {
         >
           {t("fleet.truckCount", { count: filtered.length })}
         </Badge>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex w-full items-center justify-end gap-2 sm:ml-auto sm:w-auto">
           <ToggleGroup
             type="single"
             value={view}
@@ -404,9 +405,48 @@ function FleetTable({
   const [openRowId, setOpenRowId] = useState<string | null>(null)
   const activeRow = openRowId ? rows.find((r) => r.id === openRowId) ?? null : null
 
+  const statusContent = isLoading ? (
+    <span className="inline-flex items-center gap-2">
+      <Spinner />
+      {t("common.loading")}
+    </span>
+  ) : error ? (
+    <div className="flex flex-col items-center gap-3">
+      <p className="text-sm font-medium text-foreground">
+        {t("fleet.loadFleetFailed")}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {error instanceof Error ? error.message : t("landing.tryAgain")}
+      </p>
+      <Button size="sm" variant="outline" onClick={onRetry}>
+        {t("common.retry")}
+      </Button>
+    </div>
+  ) : rows.length === 0 ? (
+    filtersActive ? t("fleet.noTrucksSearch") : t("fleet.noTrucksYet")
+  ) : null
+
   return (
     <>
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      {/* Mobile: stacked cards */}
+      <div className="space-y-3 lg:hidden">
+        {statusContent !== null ? (
+          <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">
+            {statusContent}
+          </div>
+        ) : (
+          rows.map((row) => (
+            <FleetCard
+              key={row.id}
+              row={row}
+              onShowViolations={() => setOpenRowId(row.id)}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Desktop: table */}
+      <div className="hidden overflow-hidden rounded-xl border border-border bg-card lg:block">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
@@ -617,6 +657,94 @@ function FleetTableRow({
         </Button>
       </TableCell>
     </TableRow>
+  )
+}
+
+function FleetCard({
+  row,
+  onShowViolations,
+}: {
+  row: FleetRow
+  onShowViolations: () => void
+}) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const detailPath = `/portal/fleet/${encodeURIComponent(row.vehicleId)}`
+  const actionPath = `/portal/pay-charges?vehicle=${encodeURIComponent(
+    row.plate
+  )}&vehicleId=${encodeURIComponent(row.vehicleId)}&step=circulation`
+
+  return (
+    <DataCard
+      onActivate={() =>
+        navigate(detailPath, { state: { fleetVehicle: row.item } })
+      }
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-sm font-medium tracking-wide text-foreground">
+            {row.plate}
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {row.truckNumber}
+          </p>
+        </div>
+        <StatusPill tone={row.tripTone} className="shrink-0">
+          {row.needsSettlement && <AlertTriangle className="size-3" />}
+          {row.tripLabel}
+        </StatusPill>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <DataCardField label={t("common.owner")}>
+          <span className="truncate">{row.ownerOperator}</span>
+        </DataCardField>
+        <DataCardField label={t("common.class")}>
+          {row.classLabel}
+          <span className="block text-[11px] text-muted-foreground">
+            {row.capacity}
+          </span>
+        </DataCardField>
+        <DataCardField label={t("fleet.trackerLocation")} className="col-span-2">
+          <span className="truncate">{row.tracker}</span>
+          <LocationCell latitude={row.latitude} longitude={row.longitude} />
+        </DataCardField>
+      </div>
+
+      {row.violationCount > 0 && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            onShowViolations()
+          }}
+          className="flex flex-col items-start gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <StatusPill tone={row.violationTone}>
+            <AlertTriangle className="size-3" />
+            {t("fleet.violationCount", { count: row.violationCount })}
+          </StatusPill>
+          {row.violationAmountLabel && (
+            <span className="text-[11px] font-medium text-destructive">
+              {row.violationAmountLabel}
+            </span>
+          )}
+        </button>
+      )}
+
+      <Button
+        size="default"
+        variant={row.needsSettlement ? "destructive" : "outline"}
+        onClick={(event) => {
+          event.stopPropagation()
+          navigate(actionPath, { state: { fleetVehicle: row.item } })
+        }}
+        className="w-full rounded-md"
+      >
+        {row.action === "topUp" ? t("fleet.topUp") : t("fleet.pay")}
+        <ArrowRight className="size-3.5" />
+      </Button>
+    </DataCard>
   )
 }
 
@@ -938,7 +1066,7 @@ function FleetMap({ rows }: { rows: FleetRow[] }) {
   )
 
   return (
-    <div className="relative h-[calc(100vh-12rem)] min-h-[420px] overflow-hidden rounded-xl border border-border bg-muted/40">
+    <div className="relative h-[calc(100svh-15rem)] min-h-[360px] overflow-hidden rounded-xl border border-border bg-muted/40 lg:h-[calc(100vh-12rem)]">
       <GoogleMapsBoundary>
         <Map
           key={theme}
