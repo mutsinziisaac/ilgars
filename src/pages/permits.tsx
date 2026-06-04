@@ -15,10 +15,12 @@ import {
   MoveHorizontal,
   FileText,
   MapPin,
+  Paperclip,
   Plus,
   RefreshCw,
   Route as RouteIcon,
   Search,
+  UploadCloud,
   X,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -40,7 +42,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
   Popover,
@@ -122,6 +129,13 @@ function applicationDate(permit: RoadClosurePermit): Date | null {
   if (!raw) return null
   const date = new Date(raw)
   return Number.isNaN(date.getTime()) ? null : date
+}
+
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
+
+function formatFileSize(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
 function initialForm(): RoadClosureForm {
@@ -680,6 +694,32 @@ export default function Permits() {
   const [appStatus, setAppStatus] = useState<"ALL" | PermitStatusKey>("ALL")
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
   const [form, setForm] = useState<RoadClosureForm>(() => initialForm())
+  // Attachments are UI-only for now and intentionally not sent to the backend.
+  const [attachments, setAttachments] = useState<File[]>([])
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
+
+  const addAttachments = (files: FileList | null) => {
+    if (!files?.length) return
+    const incoming = [...files]
+    const oversize = incoming.find((file) => file.size > MAX_ATTACHMENT_BYTES)
+    if (oversize) {
+      setAttachmentError(
+        t("permits.roadClosure.attachmentTooLarge", { name: oversize.name })
+      )
+      return
+    }
+    setAttachmentError(null)
+    setAttachments((current) => [
+      ...current,
+      ...incoming.filter(
+        (file) =>
+          !current.some(
+            (existing) =>
+              existing.name === file.name && existing.size === file.size
+          )
+      ),
+    ])
+  }
 
   const routesQuery = useQuery({
     queryKey: ["road-closure-routes", MUNICIPALITY_ID],
@@ -1439,6 +1479,72 @@ export default function Permits() {
                   <FieldDescription>
                     {t("permits.roadClosure.conditionsDescription")}
                   </FieldDescription>
+                </Field>
+
+                <Field data-invalid={attachmentError ? "true" : undefined}>
+                  <FieldLabel>
+                    {t("permits.roadClosure.attachments")}
+                  </FieldLabel>
+                  <FieldDescription>
+                    {t("permits.roadClosure.attachmentsDescription")}
+                  </FieldDescription>
+                  <label className="group mt-2 flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-border bg-muted/30 px-4 py-6 text-center transition-colors hover:border-primary/40 hover:bg-primary/5">
+                    <UploadCloud className="size-5 text-muted-foreground group-hover:text-primary" />
+                    <span className="text-xs text-muted-foreground">
+                      {t("permits.roadClosure.attachmentsUpload")}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground/70">
+                      {t("permits.roadClosure.attachmentsHint")}
+                    </span>
+                    <input
+                      type="file"
+                      multiple
+                      accept="application/pdf,image/jpeg,image/png"
+                      className="sr-only"
+                      onChange={(event) => {
+                        addAttachments(event.target.files)
+                        event.target.value = ""
+                      }}
+                    />
+                  </label>
+                  {attachments.length > 0 && (
+                    <ul className="mt-2 space-y-2">
+                      {attachments.map((file, index) => (
+                        <li
+                          key={`${file.name}-${file.size}`}
+                          className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2"
+                        >
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                            <Paperclip className="size-4" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-foreground">
+                              {file.name}
+                            </span>
+                            <span className="block text-xs text-muted-foreground">
+                              {formatFileSize(file.size)}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAttachments((current) =>
+                                current.filter((_, i) => i !== index)
+                              )
+                            }
+                            aria-label={t(
+                              "permits.roadClosure.attachmentRemove",
+                              { name: file.name }
+                            )}
+                            className="text-muted-foreground transition-colors hover:text-destructive"
+                          >
+                            <X className="size-4" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {attachmentError && <FieldError>{attachmentError}</FieldError>}
                 </Field>
 
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/30 p-4">

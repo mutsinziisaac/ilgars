@@ -428,6 +428,13 @@ export const ptMZ = {
         "Manter sinalização, desvios, controlo de acesso...",
       conditionsDescription:
         "Adicione notas operacionais para revisão municipal antes da aprovação.",
+      attachments: "Anexos",
+      attachmentsDescription:
+        "Anexe documentos de apoio, como plano de gestão de tráfego ou autorização do evento. Opcional.",
+      attachmentsUpload: "Clique para adicionar ficheiros",
+      attachmentsHint: "PDF, JPEG ou PNG — máx. 5MB cada",
+      attachmentTooLarge: "{{name}} excede o limite de 5MB.",
+      attachmentRemove: "Remover {{name}}",
       requestReviewNote:
         "A rota selecionada será enviada ao Core com a janela de encerramento solicitada.",
       selectRouteBeforeSubmit:

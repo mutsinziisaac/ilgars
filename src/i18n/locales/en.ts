@@ -419,6 +419,13 @@ export const en = {
       conditionsPlaceholder: "Maintain signage, diversions, access control...",
       conditionsDescription:
         "Add operational notes the municipality should review before approval.",
+      attachments: "Attachments",
+      attachmentsDescription:
+        "Attach supporting documents such as a traffic management plan or event authorization. Optional.",
+      attachmentsUpload: "Click to add files",
+      attachmentsHint: "PDF, JPEG or PNG — max 5MB each",
+      attachmentTooLarge: "{{name}} exceeds the 5MB limit.",
+      attachmentRemove: "Remove {{name}}",
       requestReviewNote:
         "The selected route will be sent to Core with the requested closure window.",
       selectRouteBeforeSubmit: "Select a municipal route before submitting.",
