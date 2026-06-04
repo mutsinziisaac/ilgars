@@ -1,5 +1,4 @@
 import { useEffect, useReducer } from "react"
-import { useMapsLibrary } from "@vis.gl/react-google-maps"
 
 const cache = new Map<string, string>()
 const inflight = new Map<string, Promise<string | null>>()
@@ -8,26 +7,113 @@ function cacheKey(lat: number, lng: number): string {
   return `${lat.toFixed(4)},${lng.toFixed(4)}`
 }
 
-function pickPlaceName(result: google.maps.GeocoderResult): string {
-  const components = result.address_components ?? []
-  const find = (type: string) =>
-    components.find((c) => c.types.includes(type))?.long_name
+type NominatimAddress = {
+  road?: string
+  pedestrian?: string
+  neighbourhood?: string
+  quarter?: string
+  suburb?: string
+  city_district?: string
+  hamlet?: string
+  village?: string
+  town?: string
+  city?: string
+  municipality?: string
+  county?: string
+  state?: string
+  region?: string
+  [key: string]: string | undefined
+}
 
-  const locality =
-    find("locality") ||
-    find("sublocality") ||
-    find("administrative_area_level_2") ||
-    find("administrative_area_level_3")
-  const region = find("administrative_area_level_1")
+type NominatimResponse = {
+  display_name?: string
+  name?: string
+  address?: NominatimAddress
+  error?: unknown
+}
 
-  if (locality && region && locality !== region) return `${locality}, ${region}`
-  if (locality) return locality
-  if (region) return region
-  return result.formatted_address
+function pickPlaceName(data: NominatimResponse): string | null {
+  const addr = data.address ?? {}
+
+  // Finest-grained label for the point itself (a road, named POI, or a
+  // neighbourhood) — this is what makes the result feel "local".
+  const specific =
+    data.name ||
+    addr.road ||
+    addr.pedestrian ||
+    addr.neighbourhood ||
+    addr.quarter ||
+    addr.suburb ||
+    addr.city_district ||
+    addr.hamlet
+
+  // Broader settlement that gives the specific label context.
+  const place =
+    addr.village ||
+    addr.town ||
+    addr.city ||
+    addr.municipality ||
+    addr.county ||
+    addr.state ||
+    addr.region
+
+  if (specific && place && specific !== place) return `${specific}, ${place}`
+  if (specific) return specific
+  if (place) return place
+  if (data.display_name) return data.display_name.split(",")[0]?.trim() || null
+  return null
+}
+
+// Nominatim's usage policy allows at most one request per second. We serialize
+// every lookup through a single queue and space request starts ~1.1s apart so
+// bursts from the table/card views (one lookup per visible row) stay compliant.
+const MIN_INTERVAL_MS = 1100
+const queue: Array<() => void> = []
+let processing = false
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function processQueue() {
+  if (processing) return
+  processing = true
+  while (queue.length > 0) {
+    const job = queue.shift()!
+    job()
+    await delay(MIN_INTERVAL_MS)
+  }
+  processing = false
+}
+
+function enqueue<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    queue.push(() => task().then(resolve, reject))
+    void processQueue()
+  })
+}
+
+async function fetchPlaceName(
+  lat: number,
+  lng: number
+): Promise<string | null> {
+  const url = new URL("https://nominatim.openstreetmap.org/reverse")
+  url.searchParams.set("format", "jsonv2")
+  url.searchParams.set("lat", String(lat))
+  url.searchParams.set("lon", String(lng))
+  url.searchParams.set("zoom", "17")
+  url.searchParams.set("accept-language", "en")
+
+  const response = await fetch(url.toString(), {
+    headers: { Accept: "application/json" },
+  })
+  if (!response.ok) return null
+  const data = (await response.json()) as NominatimResponse
+  if (data.error) return null
+  return pickPlaceName(data)
 }
 
 export function reverseGeocode(
-  geocoder: google.maps.Geocoder,
   lat: number,
   lng: number
 ): Promise<string | null> {
@@ -38,16 +124,12 @@ export function reverseGeocode(
   const pending = inflight.get(key)
   if (pending) return pending
 
-  const promise = geocoder
-    .geocode({ location: { lat, lng } })
-    .then((response) => {
-      const result = response.results[0]
-      if (!result) return null
-      const name = pickPlaceName(result)
-      cache.set(key, name)
+  const promise = enqueue(() => fetchPlaceName(lat, lng))
+    .catch(() => null)
+    .then((name) => {
+      if (name) cache.set(key, name)
       return name
     })
-    .catch(() => null)
     .finally(() => {
       inflight.delete(key)
     })
@@ -61,22 +143,20 @@ export function useReverseGeocode(
   lng: number | null,
   enabled: boolean
 ): { place: string | null } {
-  const geocodingLib = useMapsLibrary("geocoding")
   const [, forceUpdate] = useReducer((n: number) => n + 1, 0)
   const key = lat != null && lng != null ? cacheKey(lat, lng) : null
 
   useEffect(() => {
-    if (!enabled || !key || !geocodingLib || cache.has(key)) return
+    if (!enabled || !key || cache.has(key)) return
     let cancelled = false
-    const geocoder = new geocodingLib.Geocoder()
-    reverseGeocode(geocoder, lat!, lng!).then(() => {
+    reverseGeocode(lat!, lng!).then(() => {
       if (cancelled) return
       forceUpdate()
     })
     return () => {
       cancelled = true
     }
-  }, [enabled, key, geocodingLib, lat, lng])
+  }, [enabled, key, lat, lng])
 
   return { place: key ? cache.get(key) ?? null : null }
 }
