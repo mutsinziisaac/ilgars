@@ -1,4 +1,5 @@
 import { apiRequest, resolveApiBaseUrl } from "@/lib/api"
+import { fetchAllPages } from "@/lib/pagination"
 
 const CORE_API_BASE_URL = resolveApiBaseUrl(
   import.meta.env.VITE_API_BASE_URL,
@@ -135,8 +136,7 @@ export function getActiveFleetVehicles() {
 }
 
 export async function getMyFleetVehicles(status = "ACTIVE") {
-  const response = await apiRequest<Wrapped<MyFleetItem[]>>(
+  return fetchAllPages<MyFleetItem>(
     `${CORE_API_BASE_URL}/myfleet?status=${encodeURIComponent(status)}`
   )
-  return unwrap(response)
 }

@@ -1,4 +1,5 @@
 import { apiRequest, resolveApiBaseUrl } from "@/lib/api"
+import { fetchAllPages } from "@/lib/pagination"
 import {
   compactPlateNumber,
   type MotorVehicleLogbook,
@@ -244,10 +245,9 @@ function normalizePublicPrepaidTripVehicle(
 }
 
 export async function getTripsByVehicleId(vehicleId: string) {
-  const response = await apiRequest<Wrapped<VehicleTrip[]>>(
+  return fetchAllPages<VehicleTrip>(
     `${CORE_API_BASE_URL}/trips?vehicleId=${encodeURIComponent(vehicleId)}`
   )
-  return unwrap(response)
 }
 
 export async function listTrips() {
@@ -304,13 +304,12 @@ export async function listMunicipalRoutes(
   municipalityId: string,
   options: { skipAuth?: boolean } = {}
 ) {
-  const response = await apiRequest<Wrapped<MunicipalRoute[]>>(
+  return fetchAllPages<MunicipalRoute>(
     `${CORE_API_BASE_URL}/municipal-routes?municipalityId=${encodeURIComponent(
       municipalityId
     )}&allowedUse=SPECIAL_PERMIT&active=true`,
     { skipAuth: options.skipAuth }
   )
-  return unwrap(response)
 }
 
 export async function createSpecialPermitRouteRequest(
