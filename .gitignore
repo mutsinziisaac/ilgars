@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Playwright (test artifacts + the persisted auth session — holds a real token)
+test-results
+playwright-report
+/playwright/.cache
+tests/.auth
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
