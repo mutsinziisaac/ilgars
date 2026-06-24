@@ -44,7 +44,11 @@ export function resolveApiBaseUrl(
   if (/^https?:\/\//i.test(trimmed) && import.meta.env.DEV) {
     try {
       const url = new URL(trimmed)
-      return `${url.pathname}${url.search}`.replace(/\/+$/, "")
+      // In dev we keep only the path so requests flow through the Vite proxy. If the configured URL is a
+      // bare origin (e.g. http://localhost:8082), the stripped path is empty — fall back to the known API
+      // prefix so the request still matches a proxy route instead of hitting the SPA root.
+      const strippedPath = `${url.pathname}${url.search}`.replace(/\/+$/, "")
+      return strippedPath || normalizedFallback
     } catch {
       return normalizedFallback
     }

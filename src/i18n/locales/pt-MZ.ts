@@ -75,14 +75,16 @@ export const ptMZ = {
     notifications: "Notificações",
     page: "Página",
     greeting: "Boa tarde, {{name}}",
-    fleetMeta: "{{trucks}} camiões · {{companies}} empresa · Chest ID {{chestId}}",
+    fleetMeta:
+      "{{trucks}} camiões · {{companies}} empresa · Chest ID {{chestId}}",
     portalMeta: "{{page}} · {{date}}",
     newTrip: "Nova viagem",
     createTrip: "Criar viagem",
     newApplication: "Nova candidatura",
     myPermits: "Minhas licenças",
     permitsEyebrow: "Pedidos de encerramento e restrição de vias",
-    vehicleRegisterStep: "Registo de veículo · UC-002 · Etapa {{current}} de {{total}}",
+    vehicleRegisterStep:
+      "Registo de veículo · UC-002 · Etapa {{current}} de {{total}}",
     registerNewVehicle: "Registar novo veículo",
     newTripStep: "Nova viagem · Etapa {{current}} de {{total}}",
     detailEyebrow: "Minha frota · Camião",
@@ -101,7 +103,8 @@ export const ptMZ = {
     vehicleLookup: "Pesquisa de veículo",
     enterPlate: "Introduza uma matrícula.",
     vehicleFound: "Veículo encontrado",
-    vehicleFoundDescription: "{{plate}} está pronto para criar uma viagem pré-paga.",
+    vehicleFoundDescription:
+      "{{plate}} está pronto para criar uma viagem pré-paga.",
     vehicleNotFound: "Veículo não encontrado.",
     municipalityMissing: "ID do município em falta",
     municipalityMissingDescription:
@@ -183,9 +186,11 @@ export const ptMZ = {
     driver: "Motorista",
     charge: "Taxa",
     noTripsSearch: "Nenhuma viagem corresponde à pesquisa.",
-    noTripsYet: "Ainda não há viagens. Crie uma viagem para iniciar o fluxo de circulação.",
+    noTripsYet:
+      "Ainda não há viagens. Crie uma viagem para iniciar o fluxo de circulação.",
     noTrucksSearch: "Nenhum camião corresponde à pesquisa.",
-    noTrucksYet: "Ainda não há camiões na sua frota. Adicione um camião para começar.",
+    noTrucksYet:
+      "Ainda não há camiões na sua frota. Adicione um camião para começar.",
     loadFleetFailed: "Não foi possível carregar a sua frota.",
     dayCount: "{{count}} dia",
     dayCount_plural: "{{count}} dias",
@@ -285,7 +290,8 @@ export const ptMZ = {
     routeSelection: "Seleção de rota",
     routeSelectionDescription:
       "Camiões pesados exigem uma rota de licença especial ativa. Se a rota não estiver listada, submeta um pedido com coordenadas de teste para revisão de segurança.",
-    routeSearch: "Pesquisar rota conhecida ou escrever uma rota desconhecida...",
+    routeSearch:
+      "Pesquisar rota conhecida ou escrever uma rota desconhecida...",
     loadingRoutes: "A carregar rotas municipais...",
     noRouteMatches: "Nenhuma rota ativa corresponde à pesquisa.",
     routeNotDefined: "Rota não definida",
@@ -315,7 +321,8 @@ export const ptMZ = {
       "{{amount}} MZN debitados em {{channel}}. Recibo {{number}} emitido.",
     paid: "Pago",
     digitalReceipt: "Recibo digital",
-    receiptDescription: "Recibo de taxa do veículo para verificação na estrada.",
+    receiptDescription:
+      "Recibo de taxa do veículo para verificação na estrada.",
     paidRoadUserCharge: "Taxa de circulação paga",
     viewTrips: "Ver viagens",
     createAnotherTrip: "Criar outra viagem",
@@ -377,7 +384,8 @@ export const ptMZ = {
     lookupViaMvr: "Pesquisar via MVR",
     plateHelp:
       "Introduza a matrícula registada. Vamos obter o registo canónico do MVR; se ainda não existir, pode registar manualmente.",
-    duplicatePlate: "Um veículo com a matrícula {{plate}} já está na sua frota.",
+    duplicatePlate:
+      "Um veículo com a matrícula {{plate}} já está na sua frota.",
     noMvrRecord: "Nenhum registo MVR encontrado",
     noMvrRecordDescription:
       "Não encontrámos {{plate}} no MVR. Ainda pode registar o veículo manualmente - os campos serão desbloqueados na próxima etapa.",
@@ -404,9 +412,11 @@ export const ptMZ = {
     exemption: "Isenção",
     tyres: "Pneus",
     vehiclePhotos: "Fotografias do veículo",
-    vehiclePhotosDescription: "Carregue 6 ângulos. JPEG ou PNG, até 5 MB cada (BR-002-03).",
+    vehiclePhotosDescription:
+      "Carregue 6 ângulos. JPEG ou PNG, até 5 MB cada (BR-002-03).",
     uploadedCount: "{{count}} de 6 carregadas",
-    fileTooLarge: "Ficheiro demasiado grande - máximo 5 MB por foto (BR-002-03).",
+    fileTooLarge:
+      "Ficheiro demasiado grande - máximo 5 MB por foto (BR-002-03).",
     invalidPhotoType: "Use JPEG ou PNG (BR-002-03).",
     clickUpload: "Clique para carregar",
     fileHint: "JPEG/PNG · ≤ 5 MB",
@@ -449,7 +459,7 @@ export const ptMZ = {
       "A obter o registo atual da frota para este veículo.",
     vehicleNotFound: "Veículo não encontrado",
     vehicleNotFoundDescription:
-      "Não encontrámos o veículo \"{{vehicleId}}\" na sua frota ativa.",
+      'Não encontrámos o veículo "{{vehicleId}}" na sua frota ativa.',
     overview: "Visão geral",
     trips: "Viagens",
     savedFleet: "Veículo guardado na frota",
@@ -457,7 +467,8 @@ export const ptMZ = {
     compliant: "Conforme",
     notCompliant: "Não conforme",
     roadUserCharge: "Taxa de circulação",
-    chargeDescription: "Crie uma viagem no fluxo de pagamento de Taxas de Circulação.",
+    chargeDescription:
+      "Crie uma viagem no fluxo de pagamento de Taxas de Circulação.",
     vehicleDetails: "Detalhes do veículo",
     fleetId: "ID da frota",
     fleetVehicleId: "ID do veículo da frota",
@@ -480,7 +491,8 @@ export const ptMZ = {
   },
   compliance: {
     title: "Conformidade · últimos 12 meses",
-    description: "Cada célula é um dia · verde = pago · cinzento = inativo · laranja = alerta",
+    description:
+      "Cada célula é um dia · verde = pago · cinzento = inativo · laranja = alerta",
     paid: "Pago",
     idle: "Inativo",
     alert: "Alerta",
@@ -489,6 +501,20 @@ export const ptMZ = {
     idleCount: "{{count}} inativos",
     aria: "Conformidade diária dos últimos 12 meses",
     dayState: "Dia {{day}} · {{state}}",
+  },
+  deviceRequest: {
+    ...en.deviceRequest,
+    requestDevice: "Solicitar rastreador",
+    dialogTitle: "Solicitar um dispositivo de rastreio",
+    reason: "Motivo (opcional)",
+    reasonPlaceholder: "Porque é que este veículo precisa de um rastreador?",
+    submit: "Submeter pedido",
+    submitting: "A submeter...",
+    statusPending: "Rastreador solicitado",
+    statusApproved: "Rastreador aprovado",
+    statusRejected: "Rastreador rejeitado",
+    requestSuccess: "Pedido de rastreador submetido",
+    requestFailed: "Não foi possível submeter o pedido de rastreador",
   },
   stubs: {
     contentSlot: "área de conteúdo",

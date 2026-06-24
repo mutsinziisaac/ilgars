@@ -72,14 +72,16 @@ export const en = {
     notifications: "Notifications",
     page: "Page",
     greeting: "Good afternoon, {{name}}",
-    fleetMeta: "{{trucks}} trucks · {{companies}} company · Chest ID {{chestId}}",
+    fleetMeta:
+      "{{trucks}} trucks · {{companies}} company · Chest ID {{chestId}}",
     portalMeta: "{{page}} · {{date}}",
     newTrip: "New trip",
     createTrip: "Create trip",
     newApplication: "New application",
     myPermits: "My permits",
     permitsEyebrow: "Road closure & restriction applications",
-    vehicleRegisterStep: "Vehicle register · UC-002 · Step {{current}} of {{total}}",
+    vehicleRegisterStep:
+      "Vehicle register · UC-002 · Step {{current}} of {{total}}",
     registerNewVehicle: "Register a new vehicle",
     newTripStep: "New trip · Step {{current}} of {{total}}",
     detailEyebrow: "My fleet · Truck",
@@ -178,7 +180,8 @@ export const en = {
     driver: "Driver",
     charge: "Charge",
     noTripsSearch: "No trips match this search.",
-    noTripsYet: "No trips found yet. Create a trip to start the circulation flow.",
+    noTripsYet:
+      "No trips found yet. Create a trip to start the circulation flow.",
     noTrucksSearch: "No trucks match this search.",
     noTrucksYet: "No trucks in your fleet yet. Add a truck to start.",
     loadFleetFailed: "Could not load your fleet.",
@@ -398,7 +401,8 @@ export const en = {
     exemption: "Exemption",
     tyres: "Tyres",
     vehiclePhotos: "Vehicle photos",
-    vehiclePhotosDescription: "Upload 6 angles. JPEG or PNG, up to 5 MB each (BR-002-03).",
+    vehiclePhotosDescription:
+      "Upload 6 angles. JPEG or PNG, up to 5 MB each (BR-002-03).",
     uploadedCount: "{{count}} of 6 uploaded",
     fileTooLarge: "File too large - max 5 MB per photo (BR-002-03).",
     invalidPhotoType: "Use JPEG or PNG (BR-002-03).",
@@ -443,7 +447,7 @@ export const en = {
       "Fetching the current fleet record for this vehicle.",
     vehicleNotFound: "Vehicle not found",
     vehicleNotFoundDescription:
-      "We couldn't find vehicle \"{{vehicleId}}\" in your active fleet.",
+      'We couldn\'t find vehicle "{{vehicleId}}" in your active fleet.',
     overview: "Overview",
     trips: "Trips",
     savedFleet: "Saved fleet vehicle",
@@ -451,7 +455,8 @@ export const en = {
     compliant: "Compliant",
     notCompliant: "Not compliant",
     roadUserCharge: "Road user charge",
-    chargeDescription: "Create a trip through the Pay Road User Charges workflow.",
+    chargeDescription:
+      "Create a trip through the Pay Road User Charges workflow.",
     vehicleDetails: "Vehicle details",
     fleetId: "Fleet ID",
     fleetVehicleId: "Fleet vehicle ID",
@@ -474,7 +479,8 @@ export const en = {
   },
   compliance: {
     title: "Compliance · last 12 months",
-    description: "Each cell is one day · green = paid · grey = idle · orange = alert",
+    description:
+      "Each cell is one day · green = paid · grey = idle · orange = alert",
     paid: "Paid",
     idle: "Idle",
     alert: "Alert",
@@ -483,6 +489,19 @@ export const en = {
     idleCount: "{{count}} idle",
     aria: "Daily compliance for the last 12 months",
     dayState: "Day {{day}} · {{state}}",
+  },
+  deviceRequest: {
+    requestDevice: "Request device",
+    dialogTitle: "Request a tracker device",
+    reason: "Reason (optional)",
+    reasonPlaceholder: "Why does this vehicle need a tracker?",
+    submit: "Submit request",
+    submitting: "Submitting...",
+    statusPending: "Device requested",
+    statusApproved: "Device approved",
+    statusRejected: "Device rejected",
+    requestSuccess: "Device request submitted",
+    requestFailed: "Could not submit device request",
   },
   stubs: {
     contentSlot: "content slot",

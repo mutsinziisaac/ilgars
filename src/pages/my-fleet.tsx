@@ -4,20 +4,31 @@ import {
   ArrowRight,
   LayoutList,
   Map as MapIcon,
+  Radio,
   Search,
   Truck,
 } from "lucide-react"
 import L from "leaflet"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet"
+import { toast } from "sonner"
 
 import { formatDateValue } from "@/i18n/format"
 import { StatusPill } from "@/components/fleet/status-pill"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import {
   Table,
@@ -27,13 +38,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  createDeviceRequest,
+  getVehicleDeviceRequests,
+  type DeviceRequest,
+} from "@/lib/device-requests-api"
 import {
   getMyFleetVehicles,
   type MyFleetItem,
   type MyFleetTripContext,
 } from "@/lib/fleet-vehicles-api"
 import { capacityClassLabel } from "@/lib/fleet-vehicle-classification"
+import { MUNICIPALITY_ID } from "@/lib/trips-api"
 import { cn } from "@/lib/utils"
 
 type FleetAction = "pay" | "topUp"
@@ -48,6 +66,7 @@ type FleetRow = {
   capacity: string
   classLabel: string
   tracker: string
+  trackerAssigned: boolean
   location: string
   tripLabel: string
   tripMeta: string
@@ -117,10 +136,16 @@ function formatCapacity(item: MyFleetItem) {
 }
 
 function validCoordinate(latitude: unknown, longitude: unknown) {
-  if (typeof latitude !== "number" || typeof longitude !== "number") return false
+  if (typeof latitude !== "number" || typeof longitude !== "number")
+    return false
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false
   if (latitude === 0 && longitude === 0) return false
-  return latitude >= -1.6 && latitude <= 4.4 && longitude >= 29.4 && longitude <= 35.1
+  return (
+    latitude >= -1.6 &&
+    latitude <= 4.4 &&
+    longitude >= 29.4 &&
+    longitude <= 35.1
+  )
 }
 
 function fleetMarkerIcon(row: FleetRow) {
@@ -142,7 +167,10 @@ function fleetMarkerIcon(row: FleetRow) {
   })
 }
 
-function buildFleetRows(items: MyFleetItem[], t: ReturnType<typeof useTranslation>["t"]) {
+function buildFleetRows(
+  items: MyFleetItem[],
+  t: ReturnType<typeof useTranslation>["t"]
+) {
   return items
     .map((item): FleetRow => {
       const vehicle = item.vehicle
@@ -155,10 +183,11 @@ function buildFleetRows(items: MyFleetItem[], t: ReturnType<typeof useTranslatio
       const ownerOperator = [vehicle.ownerName, vehicle.operatorName]
         .filter(Boolean)
         .join(" / ")
-      const tracker = item.device?.trackerAssigned
-        ? item.device.deviceUid ||
-          item.device.serialNumber ||
-          item.device.imei ||
+      const trackerAssigned = item.device?.trackerAssigned === true
+      const tracker = trackerAssigned
+        ? item.device!.deviceUid ||
+          item.device!.serialNumber ||
+          item.device!.imei ||
           t("fleet.trackerAssigned")
         : t("fleet.noTracker")
       const latestLocation = item.location ?? item.device?.latestLocation
@@ -220,6 +249,7 @@ function buildFleetRows(items: MyFleetItem[], t: ReturnType<typeof useTranslatio
           capacitySnapshot: vehicle.capacity ?? 0,
         } as Parameters<typeof capacityClassLabel>[0]),
         tracker,
+        trackerAssigned,
         location,
         tripLabel,
         tripMeta,
@@ -351,7 +381,10 @@ function FleetTable({
         <TableBody>
           {isLoading ? (
             <TableRow>
-              <TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
+              <TableCell
+                colSpan={6}
+                className="py-12 text-center text-sm text-muted-foreground"
+              >
                 <span className="inline-flex items-center gap-2">
                   <Spinner />
                   {t("common.loading")}
@@ -360,13 +393,18 @@ function FleetTable({
             </TableRow>
           ) : error ? (
             <TableRow>
-              <TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
+              <TableCell
+                colSpan={6}
+                className="py-12 text-center text-sm text-muted-foreground"
+              >
                 <div className="flex flex-col items-center gap-3">
                   <p className="text-sm font-medium text-foreground">
                     {t("fleet.loadFleetFailed")}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {error instanceof Error ? error.message : t("landing.tryAgain")}
+                    {error instanceof Error
+                      ? error.message
+                      : t("landing.tryAgain")}
                   </p>
                   <Button size="sm" variant="outline" onClick={onRetry}>
                     {t("common.retry")}
@@ -376,8 +414,13 @@ function FleetTable({
             </TableRow>
           ) : rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
-                {query.trim() ? t("fleet.noTrucksSearch") : t("fleet.noTrucksYet")}
+              <TableCell
+                colSpan={6}
+                className="py-12 text-center text-sm text-muted-foreground"
+              >
+                {query.trim()
+                  ? t("fleet.noTrucksSearch")
+                  : t("fleet.noTrucksYet")}
               </TableCell>
             </TableRow>
           ) : (
@@ -400,7 +443,9 @@ function FleetTableRow({ row }: { row: FleetRow }) {
   return (
     <TableRow
       tabIndex={0}
-      onClick={() => navigate(detailPath, { state: { fleetVehicle: row.item } })}
+      onClick={() =>
+        navigate(detailPath, { state: { fleetVehicle: row.item } })
+      }
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault()
@@ -428,9 +473,13 @@ function FleetTableRow({ row }: { row: FleetRow }) {
         <p className="max-w-[180px] truncate text-sm text-foreground">
           {row.tracker}
         </p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {row.location}
-        </p>
+        {row.trackerAssigned ? (
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {row.location}
+          </p>
+        ) : (
+          <DeviceRequestControl row={row} />
+        )}
       </TableCell>
       <TableCell>
         <div className="flex flex-col items-start gap-1">
@@ -450,12 +499,14 @@ function FleetTableRow({ row }: { row: FleetRow }) {
       </TableCell>
       <TableCell>
         <p className="text-sm text-foreground">{row.classLabel}</p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">{row.capacity}</p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {row.capacity}
+        </p>
       </TableCell>
       <TableCell className="pr-5 text-right">
         <Button
           size="sm"
-          variant={row.needsSettlement ? "destructive" : "outline"}
+          variant={row.needsSettlement ? "destructive" : "default"}
           onClick={(event) => {
             event.stopPropagation()
             navigate(actionPath, { state: { fleetVehicle: row.item } })
@@ -467,6 +518,140 @@ function FleetTableRow({ row }: { row: FleetRow }) {
         </Button>
       </TableCell>
     </TableRow>
+  )
+}
+
+function latestDeviceRequest(requests: DeviceRequest[] | undefined) {
+  if (!requests || requests.length === 0) return null
+  return requests.reduce((latest, current) => {
+    const latestTime = new Date(latest.createdAt ?? 0).getTime()
+    const currentTime = new Date(current.createdAt ?? 0).getTime()
+    return currentTime >= latestTime ? current : latest
+  })
+}
+
+function DeviceRequestControl({ row }: { row: FleetRow }) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState("")
+
+  const requestsQuery = useQuery({
+    queryKey: ["device-requests", row.vehicleId],
+    queryFn: () => getVehicleDeviceRequests(row.vehicleId),
+    enabled: Boolean(row.vehicleId),
+  })
+
+  const latest = latestDeviceRequest(requestsQuery.data)
+  const status = latest?.status
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      createDeviceRequest({
+        vehicleId: row.vehicleId,
+        municipalityId: MUNICIPALITY_ID,
+        vehiclePlateSnapshot: row.plate,
+        reason: reason.trim() || undefined,
+      }),
+    onSuccess: async () => {
+      setOpen(false)
+      setReason("")
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["device-requests", row.vehicleId],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["myfleet"] }),
+      ])
+      toast.success(t("deviceRequest.requestSuccess"), {
+        description: row.plate,
+      })
+    },
+    onError: (error) => {
+      toast.error(t("deviceRequest.requestFailed"), {
+        description:
+          error instanceof Error ? error.message : t("landing.tryAgain"),
+      })
+    },
+  })
+
+  if (status === "PENDING") {
+    return (
+      <div className="mt-1">
+        <StatusPill tone="warning">
+          {t("deviceRequest.statusPending")}
+        </StatusPill>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 rounded-md border-amber-500/50 bg-amber-50 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-100 hover:text-amber-800"
+        disabled={requestsQuery.isLoading}
+        onClick={(event) => {
+          event.stopPropagation()
+          setOpen(true)
+        }}
+      >
+        <Radio className="size-3.5" />
+        {t("deviceRequest.requestDevice")}
+      </Button>
+      {status === "APPROVED" && (
+        <StatusPill tone="compliant">
+          {t("deviceRequest.statusApproved")}
+        </StatusPill>
+      )}
+      {status === "REJECTED" && (
+        <StatusPill tone="critical">
+          {t("deviceRequest.statusRejected")}
+        </StatusPill>
+      )}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent onClick={(event) => event.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle>{t("deviceRequest.dialogTitle")}</DialogTitle>
+            <DialogDescription>{row.plate}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="device-request-reason">
+              {t("deviceRequest.reason")}
+            </Label>
+            <Textarea
+              id="device-request-reason"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder={t("deviceRequest.reasonPlaceholder")}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setOpen(false)}
+              disabled={createMutation.isPending}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              onClick={() => createMutation.mutate()}
+              disabled={createMutation.isPending}
+            >
+              {createMutation.isPending ? (
+                <span className="inline-flex items-center gap-2">
+                  <Spinner />
+                  {t("deviceRequest.submitting")}
+                </span>
+              ) : (
+                t("deviceRequest.submit")
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   )
 }
 
@@ -532,7 +717,9 @@ function FleetTruckMarker({ row }: { row: FleetRow }) {
             </p>
             <p>
               <span className="font-medium">{t("fleet.lastSeen")}:</span>{" "}
-              {row.observedAt ? displayDate(row.observedAt) : t("fleet.noLocation")}
+              {row.observedAt
+                ? displayDate(row.observedAt)
+                : t("fleet.noLocation")}
             </p>
           </div>
         </div>
