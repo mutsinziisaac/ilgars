@@ -5,7 +5,7 @@ type Tone = "compliant" | "renewal-soon" | "trip" | "neutral" | "warning" | "cri
 const TONE_CLASSES: Record<Tone, string> = {
   compliant: "bg-chart-1/60 text-primary",
   "renewal-soon": "bg-accent text-accent-foreground",
-  trip: "bg-sidebar/10 text-sidebar",
+  trip: "bg-amber-100 text-amber-800",
   neutral: "bg-muted text-muted-foreground",
   warning: "bg-accent text-secondary",
   critical: "bg-destructive/10 text-destructive",
@@ -14,7 +14,7 @@ const TONE_CLASSES: Record<Tone, string> = {
 const DOT_CLASSES: Record<Tone, string> = {
   compliant: "bg-primary",
   "renewal-soon": "bg-secondary",
-  trip: "bg-sidebar",
+  trip: "bg-amber-500",
   neutral: "bg-muted-foreground/60",
   warning: "bg-secondary",
   critical: "bg-destructive",

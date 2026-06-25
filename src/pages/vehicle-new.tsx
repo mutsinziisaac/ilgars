@@ -35,7 +35,7 @@ import {
   plateExists,
   weightTierForKg,
 } from "@/lib/fleet"
-import { ApiError } from "@/lib/api"
+import { ApiError, getApiErrorMessage } from "@/lib/api"
 import {
   createFleetVehicle,
   type FleetVehicleRegistrationPayload,
@@ -125,25 +125,25 @@ const INITIAL_STATE: FormState = {
 
 const PHOTO_MAX_BYTES = 5 * 1024 * 1024
 
-function tonnesFromKg(value: number | null): number | null {
+function kgValue(value: number | null): number | null {
   return typeof value === "number" && Number.isFinite(value)
-    ? Number((value / 1000).toFixed(4))
+    ? Math.round(value)
     : null
 }
 
-function capacityTonnes(record: MotorVehicleLogbook, fallbackKg: number) {
+function capacityKg(record: MotorVehicleLogbook, fallbackKg: number) {
   if (
     typeof record.currentLogbookCapacity === "number" &&
     Number.isFinite(record.currentLogbookCapacity)
   ) {
     const value = record.currentLogbookCapacity
-    return value > 1000 ? Number((value / 1000).toFixed(4)) : value
+    return value > 1000 ? Math.round(value) : Math.round(value * 1000)
   }
 
   return (
-    tonnesFromKg(record.logbookCapacityKg) ??
-    tonnesFromKg(record.grossWeightTotalKg) ??
-    tonnesFromKg(fallbackKg) ??
+    kgValue(record.logbookCapacityKg) ??
+    kgValue(record.grossWeightTotalKg) ??
+    kgValue(fallbackKg) ??
     0
   )
 }
@@ -162,8 +162,8 @@ function buildFleetVehiclePayload(
     truckNumber: record.truckNumber || `TRK-${plateNumber}`,
     ownerName,
     operatorName: record.operatorName || "Demo Operator",
-    capacitySnapshot: capacityTonnes(record, form.weightKg),
-    capacityUnit: "TONNES",
+    capacitySnapshot: capacityKg(record, form.weightKg),
+    capacityUnit: "KG",
     registryStatus: record.status?.trim().toUpperCase() || "ACTIVE",
     exemptionStatus: record.exemptionStatus?.trim().toUpperCase() || "NONE",
     compliantForRating: true,
@@ -225,8 +225,7 @@ export default function VehicleNew() {
     },
     onError: (error) => {
       toast.error(t("vehicleNew.registrationFailed"), {
-        description:
-          error instanceof Error ? error.message : t("vehicleNew.submitAgain"),
+        description: getApiErrorMessage(error, t("vehicleNew.submitAgain")),
       })
     },
   })
@@ -244,8 +243,8 @@ export default function VehicleNew() {
   }
 
   return (
-    <div className="grid grid-cols-[220px_minmax(0,1fr)_320px] gap-8 pt-2 pb-20">
-      <aside className="sticky top-20 self-start">
+    <div className="flex flex-col gap-6 pt-2 pb-20 xl:grid xl:grid-cols-[220px_minmax(0,1fr)_320px] xl:gap-8">
+      <aside className="xl:sticky xl:top-20 xl:self-start">
         <VerticalStepper
             steps={STEPS.map((item) => ({
               ...item,
@@ -254,6 +253,7 @@ export default function VehicleNew() {
             }))}
           currentKey={step}
           onJump={(k) => goTo(k)}
+          desktopBreakpoint="xl"
         />
       </aside>
 
@@ -283,7 +283,7 @@ export default function VehicleNew() {
         )}
       </div>
 
-      <aside className="sticky top-20 flex flex-col gap-4 self-start">
+      <aside className="order-last flex flex-col gap-4 xl:order-none xl:sticky xl:top-20 xl:self-start">
         <LivePreview form={form} />
         {form.mvrLocked && <SourceVerifiedNote />}
       </aside>
@@ -428,9 +428,7 @@ function LogbookStep({
 
       setNotFound(false)
       setLookupError(
-        error instanceof Error
-          ? error.message
-          : t("vehicleNew.lookupFailed")
+        getApiErrorMessage(error, t("vehicleNew.lookupFailed"))
       )
     },
   })

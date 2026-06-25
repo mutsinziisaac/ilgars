@@ -1,4 +1,4 @@
-import { FileText, LayoutGrid, Receipt, Truck, type LucideIcon } from "lucide-react"
+import { FileText, LayoutGrid, Truck, type LucideIcon } from "lucide-react"
 
 export type NavItem = {
   path: string
@@ -10,8 +10,7 @@ export type NavItem = {
 export const NAV_ITEMS: readonly NavItem[] = [
   { path: "/portal", labelKey: "nav.overview", icon: LayoutGrid },
   { path: "/portal/fleet", labelKey: "nav.myFleet", icon: Truck },
-  { path: "/portal/permits", labelKey: "nav.permits", icon: FileText, badge: 2 },
-  { path: "/portal/transactions", labelKey: "nav.transactions", icon: Receipt },
+  { path: "/portal/permits", labelKey: "nav.permits", icon: FileText },
 ] as const
 
 export function findNavItem(pathname: string): NavItem | undefined {

@@ -13,7 +13,7 @@ export type FleetVehicleRegistrationPayload = {
   ownerName: string
   operatorName: string
   capacitySnapshot: number
-  capacityUnit: "TONNES"
+  capacityUnit: "KG"
   registryStatus: string
   exemptionStatus: string
   compliantForRating: boolean
@@ -96,6 +96,45 @@ export type MyFleetDeviceContext = {
   [key: string]: unknown
 }
 
+export type MyFleetViolationAssignment = {
+  respondingOfficerId?: string | null
+  respondingOfficerSubject?: string | null
+  respondingOfficerName?: string | null
+  respondingShiftId?: string | null
+  respondedAt?: string | null
+  resolvedAt?: string | null
+  releasedAt?: string | null
+  outcome?: string | null
+  [key: string]: unknown
+}
+
+export type MyFleetViolationLocation = {
+  hasLocation?: boolean
+  latitude?: number | null
+  longitude?: number | null
+  observedAt?: string | null
+  [key: string]: unknown
+}
+
+export type MyFleetViolation = {
+  id: string
+  code?: string | null
+  reason?: string | null
+  status?: string | null
+  amountDue?: number | null
+  currency?: string | null
+  paymentMode?: string | null
+  vehicleId?: string | null
+  plateNumber?: string | null
+  tripId?: string | null
+  municipalityId?: string | null
+  truckLocation?: MyFleetViolationLocation | null
+  assignment?: MyFleetViolationAssignment | null
+  createdAt?: string | null
+  updatedAt?: string | null
+  [key: string]: unknown
+}
+
 export type MyFleetItem = {
   id: string
   vehicleId: string
@@ -104,6 +143,7 @@ export type MyFleetItem = {
   trip?: MyFleetTripContext | null
   location?: MyFleetLocationContext | null
   device?: MyFleetDeviceContext | null
+  violations?: MyFleetViolation[] | null
   [key: string]: unknown
 }
 

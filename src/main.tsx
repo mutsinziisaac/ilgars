@@ -8,8 +8,8 @@ import {
 import { QueryClientProvider } from "@tanstack/react-query"
 import { createRoot } from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
+import { APIProvider } from "@vis.gl/react-google-maps"
 
-import "leaflet/dist/leaflet.css"
 import "@/i18n"
 import { LANGUAGE_CHANGE_EVENT, normalizeLocale, i18n } from "@/i18n"
 import "./index.css"
@@ -17,6 +17,7 @@ import App from "./App.tsx"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 import { Toaster } from "@/components/ui/sonner"
 import { queryClient } from "@/lib/query-client"
+import { GOOGLE_MAPS_API_KEY } from "@/lib/google-maps"
 
 function LocaleBoundary({ children }: { children: ReactNode }) {
   const [locale, setLocale] = useState(() =>
@@ -47,10 +48,12 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ThemeProvider defaultTheme="light">
-          <LocaleBoundary>
-            <App />
-          </LocaleBoundary>
-          <Toaster richColors position="top-right" />
+          <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
+            <LocaleBoundary>
+              <App />
+            </LocaleBoundary>
+            <Toaster richColors position="top-right" />
+          </APIProvider>
         </ThemeProvider>
       </BrowserRouter>
     </QueryClientProvider>

@@ -27,6 +27,102 @@ export class ApiError extends Error {
   }
 }
 
+function firstNonEmptyString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim()
+    }
+  }
+  return null
+}
+
+function extractErrorMessage(
+  value: unknown,
+  seen = new Set<unknown>()
+): string | null {
+  if (value === null || value === undefined) return null
+  if (typeof value === "string") return value.trim() || null
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value)
+  }
+  if (typeof value !== "object") return null
+  if (seen.has(value)) return null
+  seen.add(value)
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const message = extractErrorMessage(item, seen)
+      if (message) return message
+    }
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  const directMessage = firstNonEmptyString(
+    record.message,
+    record.detail,
+    record.title,
+    record.description,
+    record.error
+  )
+  if (directMessage) return directMessage
+
+  const nestedMessage = extractErrorMessage(record.data, seen)
+  if (nestedMessage) return nestedMessage
+
+  const errors = record.errors
+  if (Array.isArray(errors)) {
+    for (const item of errors) {
+      const message = extractErrorMessage(item, seen)
+      if (message) return message
+    }
+  } else if (errors && typeof errors === "object") {
+    const message = extractErrorMessage(errors, seen)
+    if (message) return message
+  }
+
+  for (const key of Object.keys(record)) {
+    if (
+      key === "message" ||
+      key === "detail" ||
+      key === "title" ||
+      key === "description" ||
+      key === "error" ||
+      key === "data" ||
+      key === "errors"
+    ) {
+      continue
+    }
+    const message = extractErrorMessage(record[key], seen)
+    if (message) return message
+  }
+
+  return null
+}
+
+export function getApiErrorMessage(
+  error: unknown,
+  fallback = "Something went wrong"
+): string {
+  if (error instanceof ApiError) {
+    return (
+      extractErrorMessage(error.body) ??
+      firstNonEmptyString(error.message) ??
+      fallback
+    )
+  }
+
+  if (error instanceof Error) {
+    return firstNonEmptyString(error.message) ?? fallback
+  }
+
+  if (typeof error === "string") {
+    return error.trim() || fallback
+  }
+
+  return fallback
+}
+
 let accessTokenProvider: AccessTokenProvider = null
 
 export function setAccessTokenProvider(provider: AccessTokenProvider) {
@@ -41,14 +137,11 @@ export function resolveApiBaseUrl(
   const normalizedFallback = fallbackPath.replace(/\/+$/, "")
   if (!trimmed) return normalizedFallback
 
-  if (/^https?:\/\//i.test(trimmed) && import.meta.env.DEV) {
+  if (/^https?:\/\//i.test(trimmed)) {
     try {
       const url = new URL(trimmed)
-      // In dev we keep only the path so requests flow through the Vite proxy. If the configured URL is a
-      // bare origin (e.g. http://localhost:8082), the stripped path is empty — fall back to the known API
-      // prefix so the request still matches a proxy route instead of hitting the SPA root.
-      const strippedPath = `${url.pathname}${url.search}`.replace(/\/+$/, "")
-      return strippedPath || normalizedFallback
+      const resolved = `${url.pathname}${url.search}`.replace(/\/+$/, "")
+      return resolved || normalizedFallback
     } catch {
       return normalizedFallback
     }

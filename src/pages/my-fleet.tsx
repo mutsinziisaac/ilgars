@@ -2,33 +2,51 @@ import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
   ArrowRight,
+  ChevronRight,
+  Clock,
   LayoutList,
   Map as MapIcon,
+  MapPin,
   Radio,
+  Receipt,
   Search,
   Truck,
 } from "lucide-react"
-import L from "leaflet"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
-import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet"
-import { toast } from "sonner"
+import {
+  InfoWindow,
+  Map,
+  Marker,
+  useMap,
+  useMapsLibrary,
+} from "@vis.gl/react-google-maps"
 
-import { formatDateValue } from "@/i18n/format"
+import fleetTruckGreen from "@/assets/fleet-truck-green.png"
+import fleetTruckGrey from "@/assets/fleet-truck-grey.png"
+import fleetTruckRed from "@/assets/fleet-truck-red.png"
+import { formatCurrencyMzn, formatDateValue } from "@/i18n/format"
+import { GoogleMapsBoundary } from "@/components/maps/google-maps-boundary"
 import { StatusPill } from "@/components/fleet/status-pill"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { DataCard, DataCardField } from "@/components/ui/data-card"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import {
   Table,
@@ -38,21 +56,40 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  createDeviceRequest,
-  getVehicleDeviceRequests,
-  type DeviceRequest,
-} from "@/lib/device-requests-api"
 import {
   getMyFleetVehicles,
   type MyFleetItem,
   type MyFleetTripContext,
+  type MyFleetViolation,
 } from "@/lib/fleet-vehicles-api"
+import {
+  formatViolationAmount,
+  isOpenViolation,
+  sumOpenAmountMzn,
+  violationCodeLabel,
+  violationStatusLabel,
+  violationStatusTone,
+  violationToneForList,
+  type ViolationTone,
+} from "@/lib/violations"
 import { capacityClassLabel } from "@/lib/fleet-vehicle-classification"
-import { MUNICIPALITY_ID } from "@/lib/trips-api"
+import {
+  getMapStyles,
+  UGANDA_CENTER,
+  UGANDA_OVERVIEW_ZOOM,
+  useResolvedTheme,
+} from "@/lib/google-maps"
+import { useReverseGeocode } from "@/lib/reverse-geocode"
 import { cn } from "@/lib/utils"
+
+const TRUCK_ICON_BY_TONE: Record<FleetRow["tripTone"], string> = {
+  trip: fleetTruckGreen,
+  compliant: fleetTruckGreen,
+  neutral: fleetTruckGrey,
+  warning: fleetTruckRed,
+  critical: fleetTruckRed,
+}
 
 type FleetAction = "pay" | "topUp"
 
@@ -66,8 +103,6 @@ type FleetRow = {
   capacity: string
   classLabel: string
   tracker: string
-  trackerAssigned: boolean
-  location: string
   tripLabel: string
   tripMeta: string
   tripTone: "compliant" | "trip" | "neutral" | "warning" | "critical"
@@ -76,15 +111,14 @@ type FleetRow = {
   latitude: number | null
   longitude: number | null
   observedAt: string | null
+  lastSeenAt: string | null
+  violations: MyFleetViolation[]
+  openViolations: MyFleetViolation[]
+  violationCount: number
+  violationTone: ViolationTone
+  violationAmountLabel: string | null
   searchText: string
 }
-
-const UGANDA_CENTER: [number, number] = [1.3733, 32.2903]
-const UGANDA_BOUNDS: L.LatLngBoundsExpression = [
-  [-1.6, 29.4],
-  [4.4, 35.1],
-]
-const UGANDA_OVERVIEW_ZOOM = 7
 
 function displayDate(value: unknown) {
   if (typeof value !== "string" || value.trim() === "") return "-"
@@ -130,47 +164,19 @@ function hasPostpaidSettlement(trip?: MyFleetTripContext | null) {
 
 function formatCapacity(item: MyFleetItem) {
   const capacity = item.vehicle.capacity
-  const unit = item.vehicle.capacityUnit ?? ""
   if (typeof capacity !== "number" || !Number.isFinite(capacity)) return "-"
-  return `${capacity.toLocaleString()} ${unit}`.trim()
+  return `${capacity.toLocaleString()} kg`
 }
 
 function validCoordinate(latitude: unknown, longitude: unknown) {
-  if (typeof latitude !== "number" || typeof longitude !== "number")
-    return false
+  if (typeof latitude !== "number" || typeof longitude !== "number") return false
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false
   if (latitude === 0 && longitude === 0) return false
-  return (
-    latitude >= -1.6 &&
-    latitude <= 4.4 &&
-    longitude >= 29.4 &&
-    longitude <= 35.1
-  )
+  return latitude >= -1.6 && latitude <= 4.4 && longitude >= 29.4 && longitude <= 35.1
 }
 
-function fleetMarkerIcon(row: FleetRow) {
-  return L.divIcon({
-    className: "fleet-marker",
-    html: `<span class="fleet-marker__truck${row.needsSettlement ? " fleet-marker__truck--alert" : ""}">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M10 17h4V5H2v12h2" />
-        <path d="M14 17h1" />
-        <path d="M20 17h2v-5l-3-4h-5" />
-        <path d="M2 13h12" />
-        <circle cx="7" cy="17" r="2" />
-        <circle cx="18" cy="17" r="2" />
-      </svg>
-    </span>`,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
-    popupAnchor: [0, -10],
-  })
-}
 
-function buildFleetRows(
-  items: MyFleetItem[],
-  t: ReturnType<typeof useTranslation>["t"]
-) {
+function buildFleetRows(items: MyFleetItem[], t: ReturnType<typeof useTranslation>["t"]) {
   return items
     .map((item): FleetRow => {
       const vehicle = item.vehicle
@@ -183,11 +189,16 @@ function buildFleetRows(
       const ownerOperator = [vehicle.ownerName, vehicle.operatorName]
         .filter(Boolean)
         .join(" / ")
-      const trackerAssigned = item.device?.trackerAssigned === true
-      const tracker = trackerAssigned
-        ? item.device!.deviceUid ||
-          item.device!.serialNumber ||
-          item.device!.imei ||
+      const violations = Array.isArray(item.violations) ? item.violations : []
+      const openViolations = violations.filter(isOpenViolation)
+      const violationTone = violationToneForList(openViolations)
+      const openMznTotal = sumOpenAmountMzn(openViolations)
+      const violationAmountLabel =
+        openMznTotal > 0 ? `${formatCurrencyMzn(openMznTotal)} MZN` : null
+      const tracker = item.device?.trackerAssigned
+        ? item.device.deviceUid ||
+          item.device.serialNumber ||
+          item.device.imei ||
           t("fleet.trackerAssigned")
         : t("fleet.noTracker")
       const latestLocation = item.location ?? item.device?.latestLocation
@@ -195,12 +206,6 @@ function buildFleetRows(
         latestLocation?.latitude,
         latestLocation?.longitude
       )
-      const location =
-        latestLocation?.hasLocation === false
-          ? t("fleet.noLocation")
-          : latestLocation?.observedAt
-            ? displayDate(latestLocation.observedAt)
-            : t("fleet.noLocation")
       const tripLabel = needsSettlement
         ? t("fleet.settlementRequired")
         : active
@@ -232,6 +237,7 @@ function buildFleetRows(
         trip?.billingStatus,
         item.device?.serialNumber,
         item.device?.imei,
+        ...violations.flatMap((v) => [v.code, v.reason, v.status, v.tripId]),
       ]
         .filter((value): value is string => typeof value === "string")
         .join(" ")
@@ -249,8 +255,6 @@ function buildFleetRows(
           capacitySnapshot: vehicle.capacity ?? 0,
         } as Parameters<typeof capacityClassLabel>[0]),
         tracker,
-        trackerAssigned,
-        location,
         tripLabel,
         tripMeta,
         tripTone,
@@ -259,16 +263,38 @@ function buildFleetRows(
         latitude: hasGps ? latestLocation!.latitude! : null,
         longitude: hasGps ? latestLocation!.longitude! : null,
         observedAt: latestLocation?.observedAt ?? null,
+        lastSeenAt: item.device?.health?.lastSeenAt ?? null,
+        violations,
+        openViolations,
+        violationCount: openViolations.length,
+        violationTone,
+        violationAmountLabel,
         searchText,
       }
     })
     .sort((a, b) => a.plate.localeCompare(b.plate))
 }
 
+type TripStatusFilter = "all" | "active" | "settlement" | "idle"
+
+const TRIP_STATUS_FILTERS: { value: TripStatusFilter; labelKey: string }[] = [
+  { value: "all", labelKey: "fleet.statusFilter.all" },
+  { value: "active", labelKey: "fleet.activeTrip" },
+  { value: "settlement", labelKey: "fleet.settlementRequired" },
+  { value: "idle", labelKey: "fleet.noActiveTrip" },
+]
+
+function tripStatusKey(row: FleetRow): TripStatusFilter {
+  if (row.tripTone === "trip") return "active"
+  if (row.tripTone === "critical") return "settlement"
+  return "idle"
+}
+
 export default function MyFleet() {
   const { t } = useTranslation()
   const [view, setView] = useState<"table" | "map">("table")
   const [query, setQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState<TripStatusFilter>("all")
   const fleetQuery = useQuery({
     queryKey: ["myfleet", "ACTIVE"],
     queryFn: () => getMyFleetVehicles("ACTIVE"),
@@ -279,14 +305,19 @@ export default function MyFleet() {
   )
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((row) => row.searchText.includes(q))
-  }, [query, rows])
+    return rows.filter((row) => {
+      if (statusFilter !== "all" && tripStatusKey(row) !== statusFilter) {
+        return false
+      }
+      if (q && !row.searchText.includes(q)) return false
+      return true
+    })
+  }, [query, rows, statusFilter])
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-3">
-        <div className="relative w-80 max-w-full">
+        <div className="relative w-full sm:w-80">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
@@ -295,13 +326,31 @@ export default function MyFleet() {
             className="h-9 rounded-lg border-border bg-background pl-8 text-sm shadow-none"
           />
         </div>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => setStatusFilter(value as TripStatusFilter)}
+        >
+          <SelectTrigger
+            className="h-9 w-full rounded-lg border-border bg-background text-sm shadow-none sm:w-44"
+            aria-label={t("fleet.statusFilter.label")}
+          >
+            <SelectValue placeholder={t("fleet.statusFilter.label")} />
+          </SelectTrigger>
+          <SelectContent>
+            {TRIP_STATUS_FILTERS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {t(option.labelKey)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Badge
           variant="secondary"
           className="bg-primary/10 px-2.5 py-1 text-xs text-primary"
         >
           {t("fleet.truckCount", { count: filtered.length })}
         </Badge>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex w-full items-center justify-end gap-2 sm:ml-auto sm:w-auto">
           <ToggleGroup
             type="single"
             value={view}
@@ -327,7 +376,7 @@ export default function MyFleet() {
       {view === "table" ? (
         <FleetTable
           rows={filtered}
-          query={query}
+          filtersActive={query.trim() !== "" || statusFilter !== "all"}
           isLoading={fleetQuery.isLoading}
           error={fleetQuery.error}
           onRetry={() => void fleetQuery.refetch()}
@@ -341,98 +390,166 @@ export default function MyFleet() {
 
 function FleetTable({
   rows,
-  query,
+  filtersActive,
   isLoading,
   error,
   onRetry,
 }: {
   rows: FleetRow[]
-  query: string
+  filtersActive: boolean
   isLoading: boolean
   error: unknown
   onRetry: () => void
 }) {
   const { t } = useTranslation()
-  return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <Table>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead className="pl-5 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              {t("fleet.truck")}
-            </TableHead>
-            <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              {t("common.owner")}
-            </TableHead>
-            <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              {t("fleet.trackerLocation")}
-            </TableHead>
-            <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              {t("fleet.tripPayment")}
-            </TableHead>
-            <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              {t("common.class")}
-            </TableHead>
-            <TableHead className="pr-5 text-right text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
-              {t("fleet.action")}
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading ? (
-            <TableRow>
-              <TableCell
-                colSpan={6}
-                className="py-12 text-center text-sm text-muted-foreground"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Spinner />
-                  {t("common.loading")}
-                </span>
-              </TableCell>
-            </TableRow>
-          ) : error ? (
-            <TableRow>
-              <TableCell
-                colSpan={6}
-                className="py-12 text-center text-sm text-muted-foreground"
-              >
-                <div className="flex flex-col items-center gap-3">
-                  <p className="text-sm font-medium text-foreground">
-                    {t("fleet.loadFleetFailed")}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {error instanceof Error
-                      ? error.message
-                      : t("landing.tryAgain")}
-                  </p>
-                  <Button size="sm" variant="outline" onClick={onRetry}>
-                    {t("common.retry")}
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          ) : rows.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={6}
-                className="py-12 text-center text-sm text-muted-foreground"
-              >
-                {query.trim()
-                  ? t("fleet.noTrucksSearch")
-                  : t("fleet.noTrucksYet")}
-              </TableCell>
-            </TableRow>
-          ) : (
-            rows.map((row) => <FleetTableRow key={row.id} row={row} />)
-          )}
-        </TableBody>
-      </Table>
+  const [openRowId, setOpenRowId] = useState<string | null>(null)
+  const activeRow = openRowId ? rows.find((r) => r.id === openRowId) ?? null : null
+
+  const statusContent = isLoading ? (
+    <span className="inline-flex items-center gap-2">
+      <Spinner />
+      {t("common.loading")}
+    </span>
+  ) : error ? (
+    <div className="flex flex-col items-center gap-3">
+      <p className="text-sm font-medium text-foreground">
+        {t("fleet.loadFleetFailed")}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {error instanceof Error ? error.message : t("landing.tryAgain")}
+      </p>
+      <Button size="sm" variant="outline" onClick={onRetry}>
+        {t("common.retry")}
+      </Button>
     </div>
+  ) : rows.length === 0 ? (
+    filtersActive ? t("fleet.noTrucksSearch") : t("fleet.noTrucksYet")
+  ) : null
+
+  return (
+    <>
+      {/* Mobile: stacked cards */}
+      <div className="space-y-3 lg:hidden">
+        {statusContent !== null ? (
+          <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">
+            {statusContent}
+          </div>
+        ) : (
+          rows.map((row) => (
+            <FleetCard
+              key={row.id}
+              row={row}
+              onShowViolations={() => setOpenRowId(row.id)}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Desktop: table */}
+      <div className="hidden overflow-hidden rounded-xl border border-border bg-card lg:block">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="pl-5 text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+                {t("fleet.truck")}
+              </TableHead>
+              <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+                {t("common.owner")}
+              </TableHead>
+              <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+                {t("fleet.trackerLocation")}
+              </TableHead>
+              <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+                {t("fleet.tripPayment")}
+              </TableHead>
+              <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+                {t("common.class")}
+              </TableHead>
+              <TableHead className="text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+                {t("fleet.violations")}
+              </TableHead>
+              <TableHead className="pr-5 text-center text-[10px] font-medium tracking-widest text-muted-foreground uppercase">
+                {t("fleet.action")}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                  <span className="inline-flex items-center gap-2">
+                    <Spinner />
+                    {t("common.loading")}
+                  </span>
+                </TableCell>
+              </TableRow>
+            ) : error ? (
+              <TableRow>
+                <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                  <div className="flex flex-col items-center gap-3">
+                    <p className="text-sm font-medium text-foreground">
+                      {t("fleet.loadFleetFailed")}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {error instanceof Error ? error.message : t("landing.tryAgain")}
+                    </p>
+                    <Button size="sm" variant="outline" onClick={onRetry}>
+                      {t("common.retry")}
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                  {filtersActive ? t("fleet.noTrucksSearch") : t("fleet.noTrucksYet")}
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((row) => (
+                <FleetTableRow
+                  key={row.id}
+                  row={row}
+                  onShowViolations={() => setOpenRowId(row.id)}
+                />
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <ViolationsDialog
+        row={activeRow}
+        open={activeRow !== null}
+        onOpenChange={(next) => {
+          if (!next) setOpenRowId(null)
+        }}
+      />
+    </>
   )
 }
 
-function FleetTableRow({ row }: { row: FleetRow }) {
+function LocationCell({
+  latitude,
+  longitude,
+}: {
+  latitude: number | null
+  longitude: number | null
+}) {
+  const { place } = useReverseGeocode(latitude, longitude, latitude != null)
+  return (
+    <p className="mt-0.5 max-w-[180px] truncate text-[11px] text-muted-foreground">
+      {place ?? "-"}
+    </p>
+  )
+}
+
+function FleetTableRow({
+  row,
+  onShowViolations,
+}: {
+  row: FleetRow
+  onShowViolations: () => void
+}) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const detailPath = `/portal/fleet/${encodeURIComponent(row.vehicleId)}`
@@ -443,9 +560,7 @@ function FleetTableRow({ row }: { row: FleetRow }) {
   return (
     <TableRow
       tabIndex={0}
-      onClick={() =>
-        navigate(detailPath, { state: { fleetVehicle: row.item } })
-      }
+      onClick={() => navigate(detailPath, { state: { fleetVehicle: row.item } })}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault()
@@ -473,13 +588,10 @@ function FleetTableRow({ row }: { row: FleetRow }) {
         <p className="max-w-[180px] truncate text-sm text-foreground">
           {row.tracker}
         </p>
-        {row.trackerAssigned ? (
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            {row.location}
-          </p>
-        ) : (
-          <DeviceRequestControl row={row} />
-        )}
+        <LocationCell
+          latitude={row.latitude}
+          longitude={row.longitude}
+        />
       </TableCell>
       <TableCell>
         <div className="flex flex-col items-start gap-1">
@@ -499,19 +611,46 @@ function FleetTableRow({ row }: { row: FleetRow }) {
       </TableCell>
       <TableCell>
         <p className="text-sm text-foreground">{row.classLabel}</p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {row.capacity}
-        </p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{row.capacity}</p>
       </TableCell>
-      <TableCell className="pr-5 text-right">
+      <TableCell>
+        {row.violationCount === 0 ? (
+          <span className="text-sm text-muted-foreground">—</span>
+        ) : (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              onShowViolations()
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.stopPropagation()
+              }
+            }}
+            className="flex flex-col items-start gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <StatusPill tone={row.violationTone}>
+              <AlertTriangle className="size-3" />
+              {t("fleet.violationCount", { count: row.violationCount })}
+            </StatusPill>
+            {row.violationAmountLabel && (
+              <span className="text-[11px] font-medium text-destructive">
+                {row.violationAmountLabel}
+              </span>
+            )}
+          </button>
+        )}
+      </TableCell>
+      <TableCell className="pr-5 text-center">
         <Button
           size="sm"
-          variant={row.needsSettlement ? "destructive" : "default"}
+          variant={row.needsSettlement ? "destructive" : "outline"}
           onClick={(event) => {
             event.stopPropagation()
             navigate(actionPath, { state: { fleetVehicle: row.item } })
           }}
-          className="rounded-md"
+          className="mx-auto rounded-md"
         >
           {row.action === "topUp" ? t("fleet.topUp") : t("fleet.pay")}
           <ArrowRight className="size-3.5" />
@@ -521,246 +660,442 @@ function FleetTableRow({ row }: { row: FleetRow }) {
   )
 }
 
-function latestDeviceRequest(requests: DeviceRequest[] | undefined) {
-  if (!requests || requests.length === 0) return null
-  return requests.reduce((latest, current) => {
-    const latestTime = new Date(latest.createdAt ?? 0).getTime()
-    const currentTime = new Date(current.createdAt ?? 0).getTime()
-    return currentTime >= latestTime ? current : latest
-  })
-}
-
-function DeviceRequestControl({ row }: { row: FleetRow }) {
+function FleetCard({
+  row,
+  onShowViolations,
+}: {
+  row: FleetRow
+  onShowViolations: () => void
+}) {
   const { t } = useTranslation()
-  const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
-  const [reason, setReason] = useState("")
-
-  const requestsQuery = useQuery({
-    queryKey: ["device-requests", row.vehicleId],
-    queryFn: () => getVehicleDeviceRequests(row.vehicleId),
-    enabled: Boolean(row.vehicleId),
-  })
-
-  const latest = latestDeviceRequest(requestsQuery.data)
-  const status = latest?.status
-
-  const createMutation = useMutation({
-    mutationFn: () =>
-      createDeviceRequest({
-        vehicleId: row.vehicleId,
-        municipalityId: MUNICIPALITY_ID,
-        vehiclePlateSnapshot: row.plate,
-        reason: reason.trim() || undefined,
-      }),
-    onSuccess: async () => {
-      setOpen(false)
-      setReason("")
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ["device-requests", row.vehicleId],
-        }),
-        queryClient.invalidateQueries({ queryKey: ["myfleet"] }),
-      ])
-      toast.success(t("deviceRequest.requestSuccess"), {
-        description: row.plate,
-      })
-    },
-    onError: (error) => {
-      toast.error(t("deviceRequest.requestFailed"), {
-        description:
-          error instanceof Error ? error.message : t("landing.tryAgain"),
-      })
-    },
-  })
-
-  if (status === "PENDING") {
-    return (
-      <div className="mt-1">
-        <StatusPill tone="warning">
-          {t("deviceRequest.statusPending")}
-        </StatusPill>
-      </div>
-    )
-  }
+  const navigate = useNavigate()
+  const detailPath = `/portal/fleet/${encodeURIComponent(row.vehicleId)}`
+  const actionPath = `/portal/pay-charges?vehicle=${encodeURIComponent(
+    row.plate
+  )}&vehicleId=${encodeURIComponent(row.vehicleId)}&step=circulation`
 
   return (
-    <div className="mt-1 flex items-center gap-2">
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-7 rounded-md border-amber-500/50 bg-amber-50 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-100 hover:text-amber-800"
-        disabled={requestsQuery.isLoading}
-        onClick={(event) => {
-          event.stopPropagation()
-          setOpen(true)
-        }}
-      >
-        <Radio className="size-3.5" />
-        {t("deviceRequest.requestDevice")}
-      </Button>
-      {status === "APPROVED" && (
-        <StatusPill tone="compliant">
-          {t("deviceRequest.statusApproved")}
+    <DataCard
+      onActivate={() =>
+        navigate(detailPath, { state: { fleetVehicle: row.item } })
+      }
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-sm font-medium tracking-wide text-foreground">
+            {row.plate}
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {row.truckNumber}
+          </p>
+        </div>
+        <StatusPill tone={row.tripTone} className="shrink-0">
+          {row.needsSettlement && <AlertTriangle className="size-3" />}
+          {row.tripLabel}
         </StatusPill>
-      )}
-      {status === "REJECTED" && (
-        <StatusPill tone="critical">
-          {t("deviceRequest.statusRejected")}
-        </StatusPill>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <DataCardField label={t("common.owner")}>
+          <span className="truncate">{row.ownerOperator}</span>
+        </DataCardField>
+        <DataCardField label={t("common.class")}>
+          {row.classLabel}
+          <span className="block text-[11px] text-muted-foreground">
+            {row.capacity}
+          </span>
+        </DataCardField>
+        <DataCardField label={t("fleet.trackerLocation")} className="col-span-2">
+          <span className="truncate">{row.tracker}</span>
+          <LocationCell latitude={row.latitude} longitude={row.longitude} />
+        </DataCardField>
+      </div>
+
+      {row.violationCount > 0 && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            onShowViolations()
+          }}
+          className="flex flex-col items-start gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <StatusPill tone={row.violationTone}>
+            <AlertTriangle className="size-3" />
+            {t("fleet.violationCount", { count: row.violationCount })}
+          </StatusPill>
+          {row.violationAmountLabel && (
+            <span className="text-[11px] font-medium text-destructive">
+              {row.violationAmountLabel}
+            </span>
+          )}
+        </button>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent onClick={(event) => event.stopPropagation()}>
-          <DialogHeader>
-            <DialogTitle>{t("deviceRequest.dialogTitle")}</DialogTitle>
-            <DialogDescription>{row.plate}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="device-request-reason">
-              {t("deviceRequest.reason")}
-            </Label>
-            <Textarea
-              id="device-request-reason"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder={t("deviceRequest.reasonPlaceholder")}
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setOpen(false)}
-              disabled={createMutation.isPending}
-            >
-              {t("common.cancel")}
-            </Button>
-            <Button
-              onClick={() => createMutation.mutate()}
-              disabled={createMutation.isPending}
-            >
-              {createMutation.isPending ? (
-                <span className="inline-flex items-center gap-2">
-                  <Spinner />
-                  {t("deviceRequest.submitting")}
-                </span>
-              ) : (
-                t("deviceRequest.submit")
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+      <Button
+        size="default"
+        variant={row.needsSettlement ? "destructive" : "outline"}
+        onClick={(event) => {
+          event.stopPropagation()
+          navigate(actionPath, { state: { fleetVehicle: row.item } })
+        }}
+        className="w-full rounded-md"
+      >
+        {row.action === "topUp" ? t("fleet.topUp") : t("fleet.pay")}
+        <ArrowRight className="size-3.5" />
+      </Button>
+    </DataCard>
+  )
+}
+
+function ViolationsDialog({
+  row,
+  open,
+  onOpenChange,
+}: {
+  row: FleetRow | null
+  open: boolean
+  onOpenChange: (next: boolean) => void
+}) {
+  const { t } = useTranslation()
+  const violations = row?.violations ?? []
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            {t("fleet.violationDetailsTitle", { plate: row?.plate ?? "" })}
+          </DialogTitle>
+          <DialogDescription>
+            {violations.length === 0
+              ? t("fleet.noViolations")
+              : t("fleet.violationCount", { count: violations.length })}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+          {violations.map((violation) => {
+            const amount = formatViolationAmount(violation)
+            const tone = violationStatusTone(violation.status)
+            const assignment = violation.assignment ?? null
+            const truckLoc = violation.truckLocation ?? null
+            return (
+              <div
+                key={violation.id}
+                className="rounded-lg border border-border bg-card p-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-foreground">
+                    {violationCodeLabel(violation.code ?? violation.reason, t)}
+                  </p>
+                  <StatusPill tone={tone}>
+                    {violationStatusLabel(violation.status, t)}
+                  </StatusPill>
+                </div>
+                <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 text-[12px] sm:grid-cols-2">
+                  {amount && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationAmount")}
+                      </dt>
+                      <dd className="font-medium text-destructive">{amount}</dd>
+                    </div>
+                  )}
+                  {violation.paymentMode && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationPaymentMode")}
+                      </dt>
+                      <dd className="text-foreground">
+                        {statusLabel(violation.paymentMode)}
+                      </dd>
+                    </div>
+                  )}
+                  {violation.tripId && (
+                    <div className="sm:col-span-2">
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationTrip")}
+                      </dt>
+                      <dd className="break-all font-mono text-[11px] text-foreground">
+                        {violation.tripId}
+                      </dd>
+                    </div>
+                  )}
+                  {violation.createdAt && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationCreatedAt")}
+                      </dt>
+                      <dd className="text-foreground">{displayDate(violation.createdAt)}</dd>
+                    </div>
+                  )}
+                  {violation.updatedAt && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationUpdatedAt")}
+                      </dt>
+                      <dd className="text-foreground">{displayDate(violation.updatedAt)}</dd>
+                    </div>
+                  )}
+                  {truckLoc?.hasLocation &&
+                    typeof truckLoc.latitude === "number" &&
+                    typeof truckLoc.longitude === "number" && (
+                      <div className="sm:col-span-2">
+                        <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          {t("fleet.violationLocation")}
+                        </dt>
+                        <dd className="font-mono text-[11px] text-foreground">
+                          {truckLoc.latitude.toFixed(5)}, {truckLoc.longitude.toFixed(5)}
+                          {truckLoc.observedAt && (
+                            <span className="ml-2 text-muted-foreground">
+                              · {displayDate(truckLoc.observedAt)}
+                            </span>
+                          )}
+                        </dd>
+                      </div>
+                    )}
+                  {assignment?.resolvedAt && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationResolvedAt")}
+                      </dt>
+                      <dd className="text-foreground">{displayDate(assignment.resolvedAt)}</dd>
+                    </div>
+                  )}
+                  {assignment?.releasedAt && (
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {t("fleet.violationReleasedAt")}
+                      </dt>
+                      <dd className="text-foreground">{displayDate(assignment.releasedAt)}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            )
+          })}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
 function FitFleetBounds({ rows }: { rows: FleetRow[] }) {
   const map = useMap()
+  const coreLib = useMapsLibrary("core")
 
   useEffect(() => {
+    if (!map || !coreLib) return
+
     const positions = rows
       .filter((row) => row.latitude !== null && row.longitude !== null)
-      .map((row) => L.latLng(row.latitude!, row.longitude!))
+      .map((row) => ({ lat: row.latitude!, lng: row.longitude! }))
 
     if (positions.length === 0) {
-      map.setView(UGANDA_CENTER, UGANDA_OVERVIEW_ZOOM, { animate: false })
+      map.setCenter(UGANDA_CENTER)
+      map.setZoom(UGANDA_OVERVIEW_ZOOM)
       return
     }
 
     if (positions.length === 1) {
-      map.setView(positions[0], UGANDA_OVERVIEW_ZOOM, { animate: false })
+      map.setCenter(positions[0])
+      map.setZoom(UGANDA_OVERVIEW_ZOOM)
       return
     }
 
-    map.fitBounds(L.latLngBounds(positions), {
-      padding: [36, 36],
-      animate: false,
-    })
-  }, [map, rows])
+    const bounds = new coreLib.LatLngBounds()
+    positions.forEach((position) => bounds.extend(position))
+    map.fitBounds(bounds, 36)
+  }, [map, coreLib, rows])
 
   return null
 }
 
-function FleetTruckMarker({ row }: { row: FleetRow }) {
+function FleetTruckMarker({
+  row,
+  isOpen,
+  onToggle,
+}: {
+  row: FleetRow
+  isOpen: boolean
+  onToggle: (id: string | null) => void
+}) {
   const map = useMap()
+  const markerLib = useMapsLibrary("marker")
+  const navigate = useNavigate()
   const { t } = useTranslation()
+  const position = { lat: row.latitude!, lng: row.longitude! }
+  const { place: geocodedPlace } = useReverseGeocode(
+    row.latitude,
+    row.longitude,
+    isOpen
+  )
+  const lastSeenValue = row.lastSeenAt ?? row.observedAt
+  const icon = markerLib
+    ? {
+        url: TRUCK_ICON_BY_TONE[row.tripTone],
+        scaledSize: new google.maps.Size(56, 42),
+        anchor: new google.maps.Point(28, 32),
+      }
+    : undefined
 
   return (
-    <Marker
-      position={[row.latitude!, row.longitude!]}
-      icon={fleetMarkerIcon(row)}
-      eventHandlers={{
-        click: () => {
-          map.setView([row.latitude!, row.longitude!], UGANDA_OVERVIEW_ZOOM, {
-            animate: true,
-          })
-        },
-      }}
-    >
-      <Popup>
-        <div className="min-w-48 space-y-2">
-          <div>
-            <p className="font-mono text-sm font-semibold tracking-wide">
-              {row.plate}
-            </p>
-            <p className="text-xs text-muted-foreground">{row.truckNumber}</p>
+    <>
+      <Marker
+        position={position}
+        icon={icon}
+        onClick={() => {
+          map?.panTo(position)
+          map?.setZoom(UGANDA_OVERVIEW_ZOOM)
+          onToggle(row.id)
+        }}
+      />
+      {isOpen && (
+        <InfoWindow position={position} onCloseClick={() => onToggle(null)}>
+          <div className="w-64 space-y-3 p-0.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-mono text-base font-semibold tracking-wide text-foreground">
+                  {row.plate}
+                </p>
+                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {row.truckNumber}
+                </p>
+              </div>
+              <StatusPill tone={row.tripTone} className="shrink-0">
+                {row.tripLabel}
+              </StatusPill>
+            </div>
+
+            <ul className="space-y-2 rounded-lg border border-border bg-muted/30 p-2.5">
+              <InfoRow
+                icon={Radio}
+                label={t("fleet.tracker")}
+                value={row.tracker}
+              />
+              <InfoRow
+                icon={Receipt}
+                label={t("fleet.tripPayment")}
+                value={row.tripLabel}
+                tone={row.needsSettlement ? "critical" : undefined}
+              />
+              <InfoRow
+                icon={MapPin}
+                label={t("fleet.location")}
+                value={geocodedPlace ?? "-"}
+              />
+              <InfoRow
+                icon={Clock}
+                label={t("fleet.lastSeen")}
+                value={lastSeenValue ? displayDate(lastSeenValue) : "-"}
+              />
+            </ul>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                navigate(`/portal/fleet/${encodeURIComponent(row.vehicleId)}`)
+              }
+              className="h-8 w-full justify-between gap-2 text-xs"
+            >
+              {t("common.viewDetails")}
+              <ChevronRight className="size-3.5" />
+            </Button>
           </div>
-          <div className="grid gap-1 text-xs">
-            <p>
-              <span className="font-medium">{t("fleet.tracker")}:</span>{" "}
-              {row.tracker}
-            </p>
-            <p>
-              <span className="font-medium">{t("fleet.tripPayment")}:</span>{" "}
-              {row.tripLabel}
-            </p>
-            <p>
-              <span className="font-medium">{t("fleet.lastSeen")}:</span>{" "}
-              {row.observedAt
-                ? displayDate(row.observedAt)
-                : t("fleet.noLocation")}
-            </p>
-          </div>
-        </div>
-      </Popup>
-    </Marker>
+        </InfoWindow>
+      )}
+    </>
   )
 }
 
+function InfoRow({
+  icon: Icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: typeof Radio
+  label: string
+  value: string
+  tone?: "critical"
+}) {
+  return (
+    <li className="flex items-start gap-2.5">
+      <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-card text-muted-foreground">
+        <Icon className="size-3.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+          {label}
+        </p>
+        <p
+          className={cn(
+            "mt-0.5 truncate text-xs font-medium",
+            tone === "critical" ? "text-destructive" : "text-foreground"
+          )}
+        >
+          {value}
+        </p>
+      </div>
+    </li>
+  )
+}
+
+const HIDE_NATIVE_POI_STYLES: google.maps.MapTypeStyle[] = [
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+  {
+    featureType: "road",
+    elementType: "labels.icon",
+    stylers: [{ visibility: "off" }],
+  },
+]
+
 function FleetMap({ rows }: { rows: FleetRow[] }) {
   const { t } = useTranslation()
+  const theme = useResolvedTheme()
+  const [openId, setOpenId] = useState<string | null>(null)
   const mappedRows = rows.filter(
     (row) => row.latitude !== null && row.longitude !== null
   )
+  const mapStyles = useMemo(
+    () => [...getMapStyles(theme), ...HIDE_NATIVE_POI_STYLES],
+    [theme]
+  )
 
   return (
-    <div className="relative h-[760px] overflow-hidden rounded-xl border border-border bg-muted/40">
-      <MapContainer
-        center={UGANDA_CENTER}
-        zoom={7}
-        minZoom={7}
-        maxBounds={UGANDA_BOUNDS}
-        maxBoundsViscosity={1}
-        zoomControl
-        scrollWheelZoom
-        attributionControl={false}
-        className="fleet-map h-full w-full"
-      >
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          subdomains={["a", "b", "c"]}
-          maxZoom={19}
-          crossOrigin
-        />
-        {mappedRows.map((row) => (
-          <FleetTruckMarker key={row.id} row={row} />
-        ))}
-        <FitFleetBounds rows={mappedRows} />
-      </MapContainer>
+    <div className="relative h-[calc(100svh-15rem)] min-h-[360px] overflow-hidden rounded-xl border border-border bg-muted/40 lg:h-[calc(100vh-12rem)]">
+      <GoogleMapsBoundary>
+        <Map
+          key={theme}
+          defaultCenter={UGANDA_CENTER}
+          defaultZoom={UGANDA_OVERVIEW_ZOOM}
+          styles={mapStyles}
+          gestureHandling="greedy"
+          disableDefaultUI={false}
+          zoomControl
+          mapTypeControl={false}
+          streetViewControl={false}
+          fullscreenControl={false}
+          clickableIcons={false}
+          className="h-full w-full"
+        >
+          {mappedRows.map((row) => (
+            <FleetTruckMarker
+              key={row.id}
+              row={row}
+              isOpen={openId === row.id}
+              onToggle={(id) => setOpenId(id)}
+            />
+          ))}
+          <FitFleetBounds rows={mappedRows} />
+        </Map>
+      </GoogleMapsBoundary>
 
       {mappedRows.length === 0 && (
-        <div className="absolute inset-0 z-[400] flex items-center justify-center bg-card/80 px-6 backdrop-blur-[1px]">
+        <div className="pointer-events-none absolute inset-0 z-[400] flex items-center justify-center bg-card/80 px-6 backdrop-blur-[1px]">
           <div className="flex max-w-sm flex-col items-center gap-3 text-center">
             <span className="flex size-12 items-center justify-center rounded-full bg-card text-primary shadow-sm">
               <Truck className="size-5" />
