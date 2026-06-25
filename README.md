@@ -179,13 +179,19 @@ vite.config.ts
 npm install           # install dependencies
 npm run dev           # start Vite dev server
 npm run build         # tsc -b && vite build  (run before any PR)
-npm run typecheck     # tsc --noEmit
+npm run typecheck     # tsc -b --noEmit  (MUST be build-mode — see note below)
 npm run lint          # eslint .
 npm run format        # prettier --write "**/*.{ts,tsx}"
 npm run preview       # preview production build
+npm run test:e2e      # Playwright E2E against live UAT (see §6.2)
 ```
 
 `npm run build` is the floor for "is this branch shippable". Type errors fail the build.
+
+> **`typecheck` must be `tsc -b --noEmit`, not `tsc --noEmit`.** The root
+> `tsconfig.json` is a solution-style stub (`"files": []` + project `references`),
+> so plain `tsc --noEmit` checks ZERO files (a silent false-green). Only build
+> mode (`tsc -b`, what `npm run build` uses) descends into `tsconfig.app.json`.
 
 ### 6.1 Authentication and API calls
 
@@ -203,6 +209,35 @@ Future backend calls should go through `apiRequest` from `src/lib/api.ts` inside
 TanStack Query query/mutation functions. The shared client refreshes the
 Keycloak token before each protected request and sends it as
 `Authorization: Bearer <jwt>`.
+
+### 6.2 End-to-end tests (Playwright)
+
+Authenticated smoke + health tests run against **live UAT** through the Vite dev
+proxy (the dev server auto-starts). Auth is real Keycloak: a `setup` project logs
+in once via the KC form and persists `storageState` (incl. the KC SSO cookie), so
+every spec re-authenticates silently — keycloak-js (`login-required`) redirects to
+the authorize endpoint and the SSO session returns a code with no login form.
+
+```bash
+npx playwright install chromium          # one-time
+cp tests/.env.example tests/.env.local   # fill E2E_USERNAME / E2E_PASSWORD (a driver/transporter UAT account)
+npm run test:e2e                         # headless
+npm run test:e2e:headed / :ui / :report
+```
+
+| File | Purpose |
+|---|---|
+| `playwright.config.ts` | baseURL :5173, serial, dev-server autostart; `setup` project → `chromium` (reuses `storageState`) |
+| `tests/auth.setup.ts` | logs in via the Keycloak form once, saves `tests/.auth/user.json` |
+| `tests/fixtures.ts` | `pageErrors` / `serverErrors` collectors + forces `en` locale for deterministic text |
+| `tests/nav.ts` | the `/portal` route map + per-page render markers |
+| `tests/smoke.spec.ts` | every portal page renders the shell + its marker, no uncaught error |
+| `tests/api-health.spec.ts` | no Core/Motorvehicle 5xx across all pages |
+| `tests/pagination.spec.ts` | the `fetchAllPages` wiring is live (`/myfleet` → `page-number=1&page-size=100`) |
+| `tests/landing.spec.ts` | the public prepaid-trip landing (`/`) renders without auth |
+
+Creds live in `tests/.env.local` (gitignored via `*.local`); `tests/.auth/` is
+gitignored (it holds a real token). NEVER commit either.
 
 ---
 
